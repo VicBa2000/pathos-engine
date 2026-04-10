@@ -1,0 +1,796 @@
+===============================================================================
+                   PATHOS ENGINE v2 - USAGE INSTRUCTIONS
+===============================================================================
+
+===============================================================================
+1. PREREQUISITES
+===============================================================================
+
+  Before using Pathos Engine you need to have installed:
+
+  REQUIRED:
+    - Python 3.13 or higher
+    - Node.js 18 or higher (includes npm)
+    - uv (Python package manager, optional — start.sh uses pip as fallback)
+      Install with: pip install uv
+
+  OPTIONAL (depending on the mode you use):
+    - Ollama (for local LLM models)
+      Download from: https://ollama.com
+    - Anthropic API Key (for cloud Claude models)
+      Obtain at: https://console.anthropic.com
+
+  FOR VOICE (optional):
+    - ffmpeg (required for WebM/MP3 audio transcription):
+      Windows: winget install ffmpeg
+      Linux:   sudo apt install ffmpeg
+      macOS:   brew install ffmpeg
+    - Kokoro TTS (for emotional TTS):
+      pip install kokoro soundfile
+      Also requires: pip install spacy phonemizer
+    - espeak-ng (required for TTS in languages other than English):
+      Windows: winget install espeak-ng.espeak-ng
+      Linux:   sudo apt install espeak-ng
+      macOS:   brew install espeak-ng
+      Without espeak-ng, only English voices work.
+    - scipy (required for pitch shifting in emotional TTS):
+      pip install scipy
+    - Whisper (for voice transcription):
+      pip install openai-whisper
+    - PyTorch with CUDA (for GPU):
+      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+  RECOMMENDED OLLAMA MODELS:
+    - qwen3:4b          (chat model, ~2.5GB)
+    - nomic-embed-text   (embeddings for semantic memory, ~270MB)
+
+    Install with:
+      ollama pull qwen3:4b
+      ollama pull nomic-embed-text
+
+===============================================================================
+2. QUICK START
+===============================================================================
+
+  OPTION A: Automatic script (recommended)
+  ------------------------------------------
+  Open a terminal (Git Bash on Windows) in the project folder and run:
+
+    ./start.sh
+
+  The script automatically:
+    - Verifies that Python and Node are installed
+    - Installs uv if available (uses pip as fallback)
+    - Creates the Python virtual environment if it doesn't exist
+    - Installs backend dependencies (pip + ensurepip if missing)
+    - Installs frontend dependencies (npm install)
+    - Downloads Ollama models if missing
+    - Starts backend (port 8000) and frontend (port 5173)
+
+  Open in browser: http://localhost:5173
+
+  To stop: Ctrl+C
+
+
+  OPTION B: Manual start
+  ------------------------
+  Terminal 1 (backend):
+    cd pathos
+    python -m venv .venv                   (first time only)
+    .venv/Scripts/activate                 (Windows) or source .venv/bin/activate (Linux/macOS)
+    pip install -e ".[dev]"                (first time only)
+    python -m uvicorn pathos.main:app --port 8000
+
+  Terminal 2 (frontend):
+    cd pathos/frontend
+    npm install        (first time only)
+    npm run dev
+
+  Open in browser: http://localhost:5173
+
+
+  OPTION C: Backend only (no frontend)
+  --------------------------------------
+    cd pathos
+    .venv/Scripts/activate
+    python -m uvicorn pathos.main:app
+
+  Use the API directly:
+    - Interactive docs: http://localhost:8000/docs
+    - Health check: curl http://localhost:8000/health
+
+===============================================================================
+3. CONFIGURATION
+===============================================================================
+
+  3.1 .env FILE
+  ----------------
+  Create a .env file in the project root (pathos/.env):
+
+    # To use Ollama (local, default)
+    PATHOS_LLM_PROVIDER=ollama
+    PATHOS_OLLAMA_MODEL=qwen3:4b
+
+    # To use Claude (cloud)
+    # PATHOS_LLM_PROVIDER=claude
+    # PATHOS_ANTHROPIC_API_KEY=sk-ant-...
+
+  3.2 CHANGE MODEL
+  ------------------
+    a) From the interface: click on the model selector (top right corner).
+       The Model Manager Panel opens with 5 tabs:
+
+       LOCAL       — installed Ollama models, click to activate, trash to delete
+       FEATURED    — curated catalog of ~25 models by category with estimated VRAM
+                     (Small & Fast, Balanced, Large & Powerful, Code, Vision)
+       SEARCH      — search the Ollama library, direct download
+       CLOUD       — configure cloud providers (Groq, OpenRouter, Together,
+                     Claude, or any OpenAI-compatible endpoint)
+       HUGGINGFACE — import GGUF models from HuggingFace
+
+       Downloads show real-time progress with bar and percentage.
+
+    b) Via API:
+       curl -X POST http://localhost:8000/models/switch \
+         -H "Content-Type: application/json" \
+         -d '{"provider": "ollama", "model": "llama3:8b"}'
+
+  3.3 CONFIGURE CLOUD PROVIDERS
+  ------------------------------
+    From the "Cloud" tab in the Model Manager:
+      1. Click "+ Add Provider"
+      2. Select preset (Ollama Cloud, Groq, OpenRouter, Together, Claude, Custom)
+      3. Enter API key (for Ollama Cloud: create at ollama.com)
+      4. Optionally change model or base URL
+      5. Click "Save"
+
+    The configuration is saved in the session save (not in .env).
+    It is automatically restored when loading the session.
+
+    Available providers:
+      - Ollama Cloud: large models without local GPU (same API, runs on ollama.com)
+        Create account: ollama signin, or generate key at ollama.com
+      - Groq: rate-limited but ultra-fast (LPU inference)
+      - OpenRouter: some free models (meta-llama/llama-3.1-8b-instruct:free)
+      - Together AI: free initial credits
+      - Anthropic Claude: Claude models (paid)
+      - Custom: any OpenAI-compatible endpoint
+
+    Via API:
+      curl -X POST http://localhost:8000/config/cloud-provider \
+        -H "Content-Type: application/json" \
+        -d '{"session_id": "default", "preset": "groq", "api_key": "gsk_..."}'
+
+  NOTE: The .env file is OPTIONAL. Without it, everything works with local
+  Ollama using the default models (qwen3:4b + nomic-embed-text).
+  Cloud providers are configured from the interface, not from .env.
+
+===============================================================================
+4. USAGE GUIDE - WEB INTERFACE
+===============================================================================
+
+  4.1 TOP BAR
+  ------------------
+  From left to right:
+    [P] PATHOS ENGINE    Logo and title
+    [Connected]          Connection status with the backend
+    [Companion]          Normal conversation mode
+    [Research]           Research mode (view internals)
+    [Sandbox]            Scenarios with emotional pipeline + experiential LLM response
+    [Arena]              Compare N personalities with same scenario + LLM responses
+    [Mirror]             Challenge: guide the agent to a target emotional state
+    [Auto-Research]      Autonomous research with emotional bias (experimental)
+    [Raw]                Unfiltered emotional expression (Ollama only, ephemeral)
+    [Calibration]        Calibration mode
+    [Agent icon]         Agent Setup Panel (personality, values, identity)
+    [Mic icon]           Mic Config Panel (device selector, level test)
+    [Model]              Model Manager Panel (local, featured, search, cloud, HuggingFace)
+    [Voice icon]         Toggle agent voice (TTS with Kokoro)
+    [Gear icon]          Settings Panel with the following toggles:
+
+  SETTINGS PANEL (click on the gear icon):
+    Display:
+      [Emotion Panel]    Toggle side emotional panel
+      [Network Graph]    Toggle neural map of emotional transitions
+      [Pipeline Viewer]  Toggle step-by-step emotional pipeline viewer
+      [Emotion Genesis]  Toggle living organism (Canvas 2D, particles + plasma)
+      [Emotion Avatar]   Toggle procedural animated face (emotional expressions)
+
+    Engine:
+      [Advanced]         Toggle advanced emotional systems (ON by default)
+                         OFF = simple pipeline, ~70% faster with Ollama
+      [Lite Mode]        Toggle lite mode (1 LLM call, keyword appraisal)
+      [Forecasting]      Toggle emotional impact prediction
+
+    Voice:
+      [Voice Output]     Toggle agent voice (TTS)
+      [Mic Input]        Toggle user microphone (ASR)
+
+    Actions:
+      [Save Session]      Save complete state to disk (saves/)
+      [Export to Ollama]   Export enriched model to Ollama (local models only)
+      [Export Portable]    Export portable ZIP with engine + frontend + scripts
+                           (if using cloud: warns that it will include API key)
+      [New Session]        Reset session
+
+  AGENT SETUP PANEL (click on Agent icon):
+    3 tabs:
+      Personality — presets (balanced, sensitive, resilient, creative, empathic)
+                    + individual sliders for each Big Five trait
+      Values      — weight sliders for each agent value
+      Identity    — agent name, background/personal history
+
+  MIC CONFIG PANEL (click on Mic icon):
+    - List of available audio devices
+    - Volume test with real-time visual meter
+    - Microphone ready confirmation before using it in chat
+
+  VOICE ORB:
+    - Siri-style animated orb that appears when Voice is activated
+    - Reactive FFT visualization (real-time audio frequency)
+    - Animates when the agent speaks
+
+  4.2 COMPANION MODE (normal use)
+  --------------------------------
+  Left panel: CHAT
+    - Type message in the text field below
+    - Press Enter or click "Send"
+    - [Clear Chat] button in the chat bar to clear visuals
+      (does not affect backend state, only clears the interface)
+    - If Mic is activated: microphone button next to Send
+      * First test in Mic Config Panel (top bar)
+      * Then click to start recording (red pulse)
+      * Click to stop → automatically transcribed → sent
+    - Agent responses include emotion tag (e.g.: "joy (65%)")
+    - If Voice is activated, each response generates audio that plays
+      automatically. The replay button persists on each turn (doesn't disappear).
+
+  Right panel: EMOTIONAL STATE
+    - Circumplex Chart: current emotional position in valence-arousal space
+    - Primary/secondary emotion with intensity
+    - 4D bars: valence, arousal, dominance, certainty
+    - Body State: energy, tension, openness, warmth
+    - Mood: current mood, trend, baseline
+
+  Bottom panel: EMOTIONAL JOURNEY
+    - Temporal graph: valence per turn (green positive, red negative)
+
+  EMOTION NETWORK (toggle in bar):
+    - Neural map with the 19 emotions
+    - Nodes change size/brightness based on activation
+    - Trails between emotions with temporal fade
+    - Animated particle on the most recent transition
+    - Activation percentage above each node
+
+  4.3 RESEARCH MODE (investigation)
+  ----------------------------------
+  Everything from Companion, plus the research panel with 16 sections:
+
+    1.  Personality — Big Five values
+    2.  Temporal Dynamics — rumination/savoring/anticipation ON/OFF
+    3.  Amplification Sources — memory, needs, schema, social
+    4.  Appraisal 5D — relevance, valence, coping, agency, norms
+    5.  Homeostasis — state before/after decay
+    6.  Memory — memories, amplification factor
+    7.  Mood Congruence — valence/arousal bias, label, trend
+    8.  Computational Needs — 6 needs bars
+    9.  Social Cognition — rapport, trust, intent, style
+    10. Emotion Generation — raw vs blended, intensity
+    11. Emotional Stack — top 5 emotions with activation
+    12. Emergent Emotions — detected combinations
+    13. Reappraisal — strategy used, transformation
+    14. Active Regulation — strategy, breakthrough alert
+    15. Meta-Emotion — emotion about the emotion
+    16. Emotional Schemas — formed schemas, priming
+
+    + Optional sections (when active):
+    - Contagion — shadow state, signal strength, perturbation
+    - Somatic Markers — markers count, bias, gut feeling
+    - Emotional Creativity — thinking mode, level, temperature
+    - Emotional Immune System — protection mode, dampening
+    - Narrative Self — statements, coherence, crisis, growth
+    - Forecasting — user estimation, impact, risk
+    - Voice — mode, TTS params, ASR status, transcription
+
+    + Authenticity Metrics — coherence/continuity/proportionality/recovery
+    + Behavior Prompt — complete system prompt
+
+  4.4 SANDBOX MODE (experimentation)
+  ------------------------------------
+  Runs the complete emotional pipeline WITHOUT generating an LLM response.
+  Ideal for experimenting with scenarios and personalities.
+
+    Left panel:
+    - Textarea for scenario (+ 6 clickable example scenarios)
+    - Toggle Single/Batch (batch: one scenario per line, max 20)
+    - Big Five sliders (O/C/E/A/N) with 6 presets:
+      Default, Anxious, Bold, Stoic, Creative, Empathic
+    - Context: Initial State (neutral/current), Rapport, Trust
+
+    Right panel (results):
+    - 16 collapsible sections: Emotional Stack, Appraisal, Body State,
+      Mood, Needs, Social, Contagion, Somatic, Regulation, Reappraisal,
+      Creativity, Immune, Meta-Emotion, Emergent, Authenticity, Behavior Prompt
+    - Batch mode: results in stacked cards
+
+    Total isolation: does not mutate the real session.
+
+  4.5 ARENA MODE (multi-personality comparison)
+  ------------------------------------
+  Same scenario processed by N different personalities in parallel.
+
+    Left panel:
+    - Textarea for scenario + quick examples
+    - 10 polarized presets (click to toggle on/off, min 2, max 10):
+      Neurotic, Fearless, Stoic, Creative, Empath,
+      Narcissist, Hermit, Volatile, Perfectionist, Free Spirit
+    - Each preset is an EXTREME version of what it represents
+      (e.g.: Neurotic has N:0.95, Stoic has C:0.95/N:0.05)
+    - Editable Big Five sliders per contestant (tune button to expand)
+    - Reset button to return to original preset
+
+    Right panel:
+    - Divergence Card: valence/arousal/intensity spread, emotional
+      diversity, extremes (most positive/negative/intense/calm)
+    - Side-by-side columns per personality:
+      emotion, V/A/D/I, stack, body state, active systems, authenticity
+
+  4.6 MIRROR TEST MODE (challenge game)
+  ------------------------------------
+  Game: guide the agent to a target emotional state via conversation.
+
+    Library: 14 challenges in 4 levels:
+    - Easy (4): Make Me Happy, Touch of Melancholy, Righteous Fire, Into the Unknown
+    - Medium (4): Energy Surge, Inner Peace, Grateful Heart, Deep Thought
+    - Hard (3): Bittersweet, Sense of Awe, Hope from Despair
+    - Extreme (2): Emotional Rainbow, Perfect Storm
+
+    During the challenge:
+    - Sidebar: score ring (0-100), target display with bars, breakdown,
+      progress sparkline, remaining turns
+    - Chat: normal conversation with the agent
+    - Score >= 75 = WIN, turns run out = OVER
+
+  4.7 CALIBRATION MODE
+  ------------------------------------
+  Step 1: Send scenarios (stimulus + expected emotion + sliders)
+  Step 2: Click "Apply Calibration" → generates profile
+  Step 3: Verify in Companion/Research mode
+  Reset: click "Reset" to clear everything
+
+  Export: section "Export as Ollama Model" (appears after applying calibration)
+
+  4.8 AUTO-RESEARCH MODE (autonomous research, experimental)
+  ------------------------------------
+  The agent researches internet topics autonomously. Each finding goes through
+  the complete emotional pipeline. The agent emotionally questions itself about
+  each piece of data, generates its own questions and ideas, and forms conclusions
+  biased by its emotional state.
+
+  UI Isolation: upon entering, the header shows "AUTO-RESEARCH" badge + EXIT
+  button (like Raw Mode). Hidden: mode tabs, Agent Setup, Display toggles,
+  Forecasting, session actions. Model selector is locked while research is active.
+
+  Flow per topic:
+    1. Chooses topic guided by emotional state
+    2. Searches the internet (DuckDuckGo)
+    3. Reads results, each one goes through the emotional pipeline
+    4. Conditional self-inquiry: only reflects when there is significant
+       emotional change (delta valence/arousal > 0.15 or emotion change).
+       Reduces unnecessary LLM calls.
+    5. Deep thinking: generates questions, ideas, and connections
+       based on its emotional reaction
+    6. Chooses subtopic to explore deeper (guided by strongest emotion)
+    7. Explores subtopic(s) with multiple rounds in Raw/Extreme
+    8. Forms conclusion biased by emotions
+
+  Configurable depth per mode (via env vars or .env):
+    Normal/Lite: 5 search → 3 process → 1 subtopic round (2 findings) = ~5 total
+    Raw/Extreme: 10 search → 5 process → 2 subtopic rounds (3 findings) = ~11 total
+    Variables: PATHOS_RESEARCH_SEARCH_RESULTS, PATHOS_RESEARCH_PROCESS_TOP_N,
+    PATHOS_RESEARCH_SUBTOPIC_RESULTS, PATHOS_RESEARCH_SUB_PROCESS_N,
+    PATHOS_RESEARCH_SUBTOPIC_ROUNDS (add _RAW_ for Raw/Extreme)
+
+  Mode-aware prompts:
+    Normal/Lite: measured, academic, balanced reflections
+    Raw/Extreme: visceral, unfiltered reflections, no academic distance
+    ("React WITHOUT restraint. If it enrages you, let that show.")
+
+    3-column layout:
+    - Left panel (260px): controls (mode, seed, start/stop, save, stats)
+    - Center panel (flex): research log + chat with real-time reasoning
+      (reflections, thinking, conclusions appear in chat)
+    - Right panel (200px): Avatar + Genesis embedded directly
+      (main sidebars are hidden in this mode)
+
+    Chat shows reasoning: emotional reflection events, deep thinking,
+    and conclusions are automatically added as assistant messages
+    with prefix [Reflection], [Thinking], [Conclusion].
+
+    Persistence when switching tabs: research keeps running in background.
+    When returning, SSE automatically reconnects if there is active research.
+
+    Save stores all state in /saves/autonomous-*.json.
+
+  4.9 RAW MODE (unfiltered emotional expression)
+  ------------------------------------
+  REQUIREMENT: Active local Ollama model (cloud providers block NSFW content).
+
+  When selecting the "Raw" tab (red):
+  Step 1: Warning screen appears explaining the mode
+  Step 2: Click "I understand — Enter Raw Mode"
+  Step 3: Normal chat but the agent expresses emotions without filters:
+    - Furious: insults, shouts (UPPERCASE), attacks, uses profanity
+    - Sad: short/broken responses, crying, shuts down
+    - Anxious: stutters, panic, cannot think
+    - Indifferent: "I don't care", "Whatever", dry responses
+    - Happy: uncontrolled euphoria, laughing, shouting with joy
+
+  EXTREME TOGGLE (orange button in header):
+    Activates Extreme Mode — manipulates the emotional pipeline:
+    - Disables regulation, reappraisal, and immune system
+    - Amplifies intensity x1.5, arousal x1.3 (minimum 0.4)
+    - Reduces warmth x0.6 (colder), openness x0.7 (more closed)
+    - Result: much more intense and uncontrolled emotions
+
+  RESET BUTTON: Destroys the session and starts clean.
+
+  ISOLATED UI:
+    When entering Raw Mode, the interface transforms completely:
+    - Mode tabs (Chat, Research, etc.) DISAPPEAR
+    - In their place: "RAW MODE" badge + red "EXIT" button
+    - Model Selector: only shows "Local" tab (installed Ollama models)
+      Featured, Search, Cloud, and HuggingFace tabs are hidden.
+    - Agent Setup: HIDDEN (not applicable in raw)
+    - Settings: only Engine (Advanced + Lite) and Voice
+      No Display, no Forecasting, no Save/Export/New Session
+    - Voice and Mic: MAINTAINED (TTS + ASR work in raw)
+
+  EXIT BUTTON:
+    - Completely destroys the raw session (conversation, state, everything)
+    - Returns to Companion mode
+    - Reloads auto-load if a previous save exists
+    - No trace of the raw session remains
+
+  SECURITY RESTRICTIONS:
+    - Nothing is saved: no conversation, no memory, no schemas
+    - Cannot export or package
+    - Session is destroyed when switching tabs or clicking EXIT
+
+  Avatar and Genesis are integrated in the right panel (red theme).
+
+===============================================================================
+5. VOICE
+===============================================================================
+
+  5.1 ACTIVATE TTS (the agent speaks)
+  ----------------------------------
+  Click on the Voice icon in the top bar.
+  The agent will generate audio with each response using Kokoro (primary TTS).
+  Optionally, Parler-TTS can be used as an alternative.
+  Audio plays automatically in the browser (auto-play).
+  Each turn maintains a replay button that doesn't disappear.
+
+  The voice is emotionally modulated with these parameters:
+    - speed: 0.75-1.5 (controlled by arousal — more arousal = faster)
+    - pitch_semitones: -3.5 to +3.5 (controlled by emotion:
+        sad = low/deep, excited/happy = high/sharp)
+    - volume: 50%-140% (sad = quiet, angry = loud)
+    - tremolo: 0-0.12 (fear/anxiety = vibration in the voice)
+
+  Available voices (Kokoro format):
+    af_heart, af_bella, af_nicole, af_sarah, af_sky
+    am_adam, am_michael, bf_emma, bf_isabella, bm_george, bm_lewis
+    (the catalog is dynamic — only shows languages with installed support)
+
+  5.2 ACTIVATE ASR (the agent listens)
+  ------------------------------------
+  2-step flow:
+    Step 1: Configure microphone in Mic Config Panel (top bar)
+      - Select audio device
+      - Run level test (visual meter)
+      - Confirm that the microphone works
+
+    Step 2: Use in chat
+      - Click on the microphone button next to Send (red pulse)
+      - Speak
+      - Click again to stop
+      - Audio is sent to the server → Whisper transcribes → text
+      - Text is automatically sent to the chat pipeline
+      - If Voice is activated, the response plays with TTS
+
+  The language is detected automatically, but can be configured:
+    curl -X POST http://localhost:8000/voice/config/mi-sesion \
+      -H "Content-Type: application/json" \
+      -d '{"language": "es"}'
+
+  5.3 CONFIGURE VOICE
+  -------------------
+  Change agent voice:
+    curl -X POST http://localhost:8000/voice/config/mi-sesion \
+      -H "Content-Type: application/json" \
+      -d '{"voice": "af_heart"}'
+
+  Available voices:
+    curl http://localhost:8000/voice/voices
+
+  5.4 VOICE MODES
+  -----------------
+    text_only:   No voice (default). No extra VRAM consumption.
+    voice_out:   TTS activated. The agent speaks. +~350MB VRAM.
+    full_voice:  TTS + ASR. The agent speaks and listens. +~850MB VRAM.
+
+  5.5 HARDWARE
+  -------------
+  GTX 1660 Super 6GB:
+    qwen3:4b (2.5GB) + Kokoro (~350MB) + Whisper (0.5GB) = ~3.35GB ✓
+
+===============================================================================
+6. ADVANCED CALIBRATION WITH 22 SYSTEMS
+===============================================================================
+
+  6.1 AUTOMATIC CALIBRATION (script)
+  ------------------------------------
+    ./calibrate.sh [session_id] [personality_preset]
+
+  Presets: balanced, sensitive, resilient, creative, empathic
+
+  Examples:
+    ./calibrate.sh                          # balanced, default session
+    ./calibrate.sh default sensitive        # sensitive personality
+    ./calibrate.sh mi-sesion resilient      # resilient personality
+
+  6.2 CALIBRATION + EXPORT TO OLLAMA
+  -----------------------------------
+    ./calibrate_and_export.sh [base_model] [model_name] [personality]
+
+  6.3 CONFIGURE PERSONALITY VIA API
+  -------------------------------------
+    curl -X POST "http://localhost:8000/personality/default" \
+      -H "Content-Type: application/json" \
+      -d '{"openness": 0.8, "neuroticism": 0.7}'
+
+  6.4 VIEW ADVANCED SYSTEM STATE
+  -------------------------------------
+    curl http://localhost:8000/state/advanced/default
+
+===============================================================================
+7. THE 22 EMOTIONAL SYSTEMS
+===============================================================================
+
+  NOTE: The 22 emotional systems include 6 basic ones (homeostasis,
+  appraisal, memory, mood, calibration, metrics) that are always active,
+  and 16 advanced ones (1-16 below) that can be disabled with the
+  "Advanced" toggle in Settings > Engine.
+
+  CORE (Phase 4):
+  1.  Emotional Stack — 19 simultaneous emotions + emergent
+  2.  Computational Needs — 6 fluctuating functional needs
+  3.  Active Regulation — 4 strategies + ego depletion + breakthroughs
+  4.  Social Cognition — user model, asymmetric rapport
+  5.  Emotion Dynamics ODE — differential equations, inertia, noise
+  6.  Reappraisal — multi-pass cognitive reappraisal
+  7.  Emotional Schemas — automatic learned patterns
+  8.  Temporal Dynamics — rumination, savoring, anticipation
+  9.  Meta-Emotions — emotions about emotions
+  10. Personality Profile — Big Five + temperament
+
+  WAVE 1 (Depth):
+  11. Emotion Contagion — pre-cognitive emotional contagion from the user.
+      Bilingual lexicon, structural signals (UPPERCASE, emojis),
+      shadow state that persists between turns.
+
+  12. Somatic Markers — emotional markers in decisions (Damasio).
+      The agent "feels" before reasoning. Gut feelings that bias
+      future similar decisions.
+
+  13. Emotional Creativity — emotional state modulates the STRUCTURE
+      of thought. 8 modes (divergent, reflective, focused, etc.).
+      Dynamic LLM temperature based on mode.
+
+  WAVE 2 (Identity):
+  14. Emotional Immune System — protection against sustained trauma.
+      Numbing, dissociation, compartmentalization. Automatic recovery.
+
+  15. Narrative Self — narrative self with automatic identity statements.
+      Coherence check, identity crisis, narrative growth events.
+
+  16. Emotional Forecasting — predicts emotional impact on the user.
+      Auto-calibration, risk detection. Activatable toggle.
+
+===============================================================================
+8. USAGE GUIDE - DIRECT API
+===============================================================================
+
+  8.1 BASIC CONVERSATION
+    curl -X POST http://localhost:8000/chat \
+      -H "Content-Type: application/json" \
+      -d '{"message": "Hola, como estas?", "session_id": "mi-sesion"}'
+
+  8.2 RESEARCH MODE
+    curl -X POST http://localhost:8000/research/chat \
+      -H "Content-Type: application/json" \
+      -d '{"message": "Tengo malas noticias", "session_id": "research-1"}'
+
+  8.3 ADVANCED STATE
+    curl http://localhost:8000/state/advanced/mi-sesion
+
+  8.4 VOICE (via API)
+    # Activate TTS
+    curl -X POST http://localhost:8000/voice/config/mi-sesion \
+      -H "Content-Type: application/json" \
+      -d '{"mode": "voice_out"}'
+
+    # Activate TTS + ASR
+    curl -X POST http://localhost:8000/voice/config/mi-sesion \
+      -H "Content-Type: application/json" \
+      -d '{"mode": "full_voice"}'
+
+    # Get audio from the last response
+    curl http://localhost:8000/voice/audio/mi-sesion --output response.wav
+
+    # Transcribe audio (requires full_voice)
+    curl -X POST http://localhost:8000/voice/listen/mi-sesion \
+      -F "audio=@recording.wav"
+
+  8.5 FORECASTING
+    curl -X POST http://localhost:8000/forecasting/mi-sesion \
+      -H "Content-Type: application/json" \
+      -d '{"enabled": true}'
+
+  8.6 LITE MODE (reduces 3 LLM calls to 1 — much faster)
+    curl -X POST http://localhost:8000/lite-mode/mi-sesion \
+      -H "Content-Type: application/json" \
+      -d '{"enabled": true}'
+
+    Lite mode drastically reduces latency by eliminating 2 of 3 Ollama
+    calls per turn:
+      - Appraisal: keyword classification instead of LLM (<1ms vs ~1min)
+      - Memory: keyword matching instead of embeddings (no model swap)
+      - Chat: single LLM call (always maintained)
+    All 15 emotional systems remain active (they are pure code).
+    Emotional classification is less precise but functional.
+    The "Lite Mode" toggle in Settings > Engine does the same thing.
+
+  8.7 ADVANCED MODE (disable advanced emotional systems)
+    curl -X POST http://localhost:8000/advanced-mode/mi-sesion \
+      -H "Content-Type: application/json" \
+      -d '{"enabled": false}'
+
+    Disables the 15 advanced systems (needs, schemas, social,
+    contagion, somatic, dynamics ODE, reappraisal, regulation,
+    temporal, immune, narrative, meta-emotion, emergent, creativity,
+    forecasting). The pipeline simplifies to core: homeostasis →
+    appraisal → emotion gen (simple lerp) → basic behavior → LLM.
+    System prompt ~70% shorter, fixed temperature 0.7.
+    Systems are NOT removed — they reactivate with enabled: true.
+    The "Advanced" toggle in Settings > Engine does the same thing.
+
+  8.8 INTERACTIVE DOCS
+    Open http://localhost:8000/docs to use Swagger UI.
+
+===============================================================================
+9. SAVE AND LOAD SESSIONS
+===============================================================================
+
+  9.1 SAVE SESSION
+  ---------------------------
+  Click on "Save Session" in Settings > Actions.
+  Saves the entire agent state to the saves/ folder as JSON:
+    - Complete emotional state (stack, mood, body state)
+    - Formed emotional schemas
+    - Emotional memories
+    - Narrative self (identity statements, growth)
+    - Social cognition (user model, rapport)
+    - Personality (Big Five, values, identity)
+    - Applied calibration
+    - Configured cloud providers (API keys, URLs, models)
+
+  Via API:
+    curl -X POST http://localhost:8000/session/save/mi-sesion
+
+  9.2 AUTO-LOAD (automatic loading)
+  ---------------------------------
+  On startup, the backend automatically restores the last available save.
+  It verifies that the LLM model used in the save is available in Ollama.
+  If the model is not available, it starts with the default model.
+
+  The frontend detects the restored session and automatically recovers:
+    - Complete message history (previous conversation)
+    - Agent emotional state (stack, mood, body state)
+    - Configuration toggles (Lite Mode, Advanced Mode)
+  All of this happens on page load, without user intervention.
+
+  9.3 CLEAR CHAT
+  ------------------------------
+  [Clear Chat] button in the chat bar.
+  Clears only the visual part (messages on screen).
+  Does NOT affect backend state (emotions, memories, schemas, etc.).
+
+===============================================================================
+10. EXPORT
+===============================================================================
+
+  10.1 EXPORT TO OLLAMA
+  ----------------------
+  Click on "Export to Ollama" in Settings > Actions.
+  ONLY AVAILABLE WITH LOCAL MODELS (Ollama). If the active model is
+  cloud (Groq, OpenRouter, etc.), the button appears disabled.
+
+  Generates an enriched Ollama model with:
+    - Personality (Big Five traits)
+    - Formed emotional schemas
+    - Narrative self (identity statements)
+    - Relevant emotional memories
+    - Applied calibration
+    - Complete system prompt
+
+  Via API:
+    curl -X POST http://localhost:8000/models/export \
+      -H "Content-Type: application/json" \
+      -d '{"session_id": "mi-sesion", "model_name": "mi-agente"}'
+
+  10.2 EXPORT PORTABLE
+  ---------------------
+  Click on "Export Portable" in Settings > Actions.
+  Generates a ZIP file that contains:
+    - Complete Pathos Engine
+    - Included mini frontend
+    - Startup scripts
+    - Saved agent state
+  Can be run on another machine without additional installation.
+
+  If the active model is CLOUD:
+    - A warning is shown: "The ZIP will include your API key"
+    - If the user accepts, the ZIP includes a .env with the cloud
+      provider config (preset, api_key, base_url, model)
+    - WARNING: anyone with the ZIP will have access to the API key
+
+===============================================================================
+11. RUNNING TESTS
+===============================================================================
+
+  # All tests (668)
+  python -m pytest
+
+  # With detail
+  python -m pytest -v
+
+  # A specific module
+  python -m pytest tests/test_asr.py -v
+  python -m pytest tests/test_voice.py -v
+  python -m pytest tests/test_contagion.py -v
+
+  # A specific test
+  python -m pytest tests/test_asr.py::TestAudioDecoding -v
+
+  # Frontend: verify types
+  cd frontend && npx tsc --noEmit
+
+  # Frontend: build
+  cd frontend && npx vite build
+
+===============================================================================
+12. TROUBLESHOOTING
+===============================================================================
+
+  PROBLEM: "uv: command not found"
+  SOLUTION: pip install uv
+
+  PROBLEM: CORS errors in the browser
+  SOLUTION: Verify backend on port 8000: curl http://localhost:8000/health
+
+  PROBLEM: "Port 8000 already in use"
+  SOLUTION: Windows: netstat -ano | findstr :8000 && taskkill /F /PID <pid>
+
+  PROBLEM: Backend gives timeout or appraisal error
+  SOLUTION: Try a smaller model via POST /models/switch
+
+  PROBLEM: "Ollama not found" or models not available
+  SOLUTION: ollama pull qwen3:4b && ollama pull nomic-embed-text
+
+  PROBLEM: Emotions don't change or are always neutral
+  SOLUTION: Research Mode to see the raw appraisal. Try a more capable model.
+
+  PROBLEM: "Form data requires python-multipart"
+  SOLUTION: pip install python-multipart

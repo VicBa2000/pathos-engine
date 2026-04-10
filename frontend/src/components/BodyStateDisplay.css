@@ -1,0 +1,50 @@
+/* ===== Body State (compact) ===== */
+.body-state h3 {
+  margin: 0 0 6px;
+  font-size: 10px;
+  color: #4a4a6a;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-weight: 700;
+}
+
+.body-state__bars {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.body-state__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.body-state__label {
+  width: 50px;
+  font-size: 10px;
+  color: #5558;
+  font-weight: 500;
+}
+
+.body-state__track {
+  flex: 1;
+  height: 6px;
+  background: #1a1a30;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.body-state__fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.body-state__value {
+  width: 32px;
+  text-align: right;
+  font-size: 10px;
+  color: #5558;
+  font-family: monospace;
+}

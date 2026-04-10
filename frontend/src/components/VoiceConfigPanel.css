@@ -1,0 +1,251 @@
+/* ===== Voice Config Panel ===== */
+.voice-config {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 44px;
+  width: 280px;
+  background: #14142c;
+  border: 1px solid #2a2a4a;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  animation: voice-config-in 0.15s ease-out;
+  overflow: hidden;
+}
+
+@keyframes voice-config-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.voice-config__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+}
+
+.voice-config__title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #8888cc;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.voice-config__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  color: #5558;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.voice-config__close:hover {
+  color: #aab;
+  background: #2a2a4a;
+}
+
+.voice-config__section {
+  padding: 8px 14px;
+}
+
+.voice-config__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #5558;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+.voice-config__auto-badge {
+  font-size: 8px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #2a2a6a;
+  color: #6a6acc;
+  letter-spacing: 0.5px;
+}
+
+/* Language grid */
+.voice-config__lang-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.voice-config__lang {
+  padding: 4px 10px;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  background: transparent;
+  color: #6668;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.voice-config__lang:hover {
+  border-color: #4a4a7a;
+  color: #aab;
+}
+
+.voice-config__lang--active {
+  background: #2a2a5a;
+  border-color: #5a5aaa;
+  color: #ccd;
+}
+
+/* Voice list */
+.voice-config__voice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.voice-config__voice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #8888aa;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.voice-config__voice:hover {
+  background: #1a1a3a;
+  color: #ccd;
+}
+
+.voice-config__voice--active {
+  background: #1e1e4a;
+  border-color: #4a4a8a;
+  color: #dde;
+}
+
+.voice-config__voice-name {
+  font-weight: 500;
+}
+
+.voice-config__voice-gender {
+  font-size: 10px;
+  color: #5558;
+  font-weight: 600;
+}
+
+/* Backend selector */
+.voice-config__backend-row {
+  display: flex;
+  gap: 6px;
+}
+
+.voice-config__backend {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.voice-config__backend:hover {
+  border-color: #4a4a7a;
+  background: #1a1a3a;
+}
+
+.voice-config__backend--active {
+  border-color: #5a5aaa;
+  background: #1e1e4a;
+}
+
+.voice-config__backend--parler {
+  border-color: #6a5acd;
+  background: rgba(106, 90, 205, 0.15);
+}
+
+.voice-config__backend-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #aab;
+}
+
+.voice-config__backend--active .voice-config__backend-name {
+  color: #dde;
+}
+
+.voice-config__backend-desc {
+  font-size: 9px;
+  color: #5558;
+}
+
+.voice-config__backend--active .voice-config__backend-desc {
+  color: #7a7aaa;
+}
+
+.voice-config__parler-note {
+  margin-top: 6px;
+  font-size: 10px;
+  color: #7a6acd;
+  line-height: 1.4;
+  padding: 6px 8px;
+  background: rgba(106, 90, 205, 0.08);
+  border-radius: 6px;
+  border: 1px solid rgba(106, 90, 205, 0.15);
+}
+
+/* Parler ready indicator */
+.voice-config__parler-ready {
+  color: #85cdca;
+  font-weight: 600;
+}
+
+.voice-config__parler-note code {
+  font-size: 9px;
+  background: rgba(30, 30, 60, 0.5);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: #aab;
+}
+
+/* Voice hint (for Parler mode) */
+.voice-config__voice-hint {
+  font-size: 10px;
+  color: #5a5a8a;
+  margin-bottom: 4px;
+  font-style: italic;
+}
+
+/* Disabled language buttons (for Parler EN-only) */
+.voice-config__lang--disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Info text */
+.voice-config__info {
+  font-size: 11px;
+  color: #4a4a6a;
+  line-height: 1.4;
+  padding-bottom: 4px;
+}

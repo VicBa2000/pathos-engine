@@ -1,0 +1,207 @@
+===============================================================================
+                         PATHOS ENGINE — NOTICE
+===============================================================================
+
+Copyright (c) 2026 Victor Barrantes
+Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0)
+
+This file provides attribution to the theoretical foundations, researchers,
+and open source projects that made Pathos Engine possible.
+
+===============================================================================
+1. THEORETICAL FOUNDATIONS
+===============================================================================
+
+Pathos Engine implements a functional emotional architecture for LLMs.
+The following theories and their authors form the intellectual bedrock
+of this system. Pathos does not claim authorship of these theories —
+it implements them computationally for the first time in a unified system.
+
+  APPRAISAL THEORY (Stimulus Evaluation)
+    Richard S. Lazarus — "Emotion and Adaptation" (1991)
+    Klaus R. Scherer — Component Process Model of Emotion (2001)
+    The core idea: emotions arise from how we evaluate events relative
+    to our goals and values. Pathos implements this as a 5-dimensional
+    appraisal vector (relevance, valence, coping, agency, norm_alignment).
+
+  DIMENSIONAL MODEL OF AFFECT (Emotional State Space)
+    James A. Russell — Circumplex Model of Affect (1980)
+    Albert Mehrabian — PAD Emotional State Model (1974)
+    The core idea: emotional experience can be mapped as continuous
+    dimensions rather than discrete categories. Pathos uses a 4D space
+    (valence, arousal, dominance, certainty) plus a 19-emotion stack.
+
+  DYNAFFECT (Emotional Dynamics)
+    Peter Kuppens, Francis Tuerlinckx, et al. — "DynAffect" (2010)
+    The core idea: emotions follow differential equations with attractors,
+    noise, and perturbation terms. Pathos implements this as:
+    dx/dt = -k*(x - attractor) + noise + perturbation
+
+  BIG FIVE PERSONALITY MODEL
+    Paul T. Costa Jr. & Robert R. McCrae — NEO Personality Inventory (1992)
+    Lewis R. Goldberg — Lexical Hypothesis (1990)
+    The core idea: personality can be described along five orthogonal
+    dimensions. Pathos uses Big Five (openness, conscientiousness,
+    extraversion, agreeableness, neuroticism) + 3 temperament traits
+    to modulate all emotional processing.
+
+  HOMEOSTATIC EMOTION REGULATION
+    Antonio Damasio — "Descartes' Error" (1994), Somatic Marker Hypothesis
+    Walter Bradford Cannon — Homeostasis concept (1932)
+    The core idea: the body maintains emotional equilibrium through
+    feedback mechanisms, and gut feelings guide decision-making.
+    Pathos implements homeostatic decay, baseline shift, sensitization,
+    and computational somatic markers.
+
+  EMOTIONAL SCHEMAS
+    Jeffrey E. Young — Schema Therapy (1990), Early Maladaptive Schemas
+    Aaron T. Beck — Cognitive Schemas (1967)
+    The core idea: learned emotional patterns create automatic reactions
+    that can become maladaptive. Pathos auto-forms schemas from repeated
+    emotional patterns and detects maladaptivity.
+
+  META-EMOTIONAL AWARENESS
+    John Gottman — Meta-Emotion Philosophy (1997)
+    Peter Salovey & John D. Mayer — Emotional Intelligence (1990)
+    The core idea: we have emotions about our emotions (curiosity about
+    a new feeling, conflict when values clash). Pathos computes 5 types
+    of meta-emotional response.
+
+  INTEROCEPTIVE AWARENESS (Self-Initiated Inquiry)
+    A.D. (Bud) Craig — Interoception: The Sense of the Physiological
+    Condition of the Body (2003)
+    The core idea: awareness of internal bodily states drives emotional
+    self-awareness. Pathos triggers spontaneous self-reflection when
+    internal emotional thresholds are crossed.
+
+  EMBODIED COGNITION (Computational Body State)
+    George Lakoff & Mark Johnson — "Philosophy in the Flesh" (1999)
+    The core idea: cognition is shaped by the body. Pathos simulates
+    a computational body (energy, tension, openness, warmth) that
+    modulates behavior.
+
+  EMOTION CONTAGION
+    Elaine Hatfield, John Cacioppo, Richard Rapson — "Emotional
+    Contagion" (1994)
+    The core idea: emotions transfer between individuals automatically
+    and pre-cognitively. Pathos detects user emotion from text and
+    applies it as a perturbation to the agent's emotional ODE.
+
+  EMOTIONAL IMMUNE SYSTEM
+    Daniel Gilbert — "Stumbling on Happiness" (2006)
+    The core idea: humans have a psychological immune system that
+    protects against sustained negative affect. Pathos implements
+    numbing, dissociation, and compartmentalization as protective
+    mechanisms.
+
+  NARRATIVE IDENTITY
+    Dan P. McAdams — "The Stories We Live By" (1993)
+    The core idea: identity is constructed through narrative. Pathos
+    builds an emergent self-concept from accumulated emotional
+    experiences and detects identity crises.
+
+  EMOTIONAL FORECASTING
+    Timothy D. Wilson & Daniel T. Gilbert — Affective Forecasting (2003)
+    The core idea: we predict (often inaccurately) how future events
+    will make us feel. Pathos predicts the emotional impact of its
+    responses on the user.
+
+  ACTIVE REGULATION & EGO DEPLETION
+    James J. Gross — Process Model of Emotion Regulation (1998)
+    Roy F. Baumeister — Ego Depletion (1998)
+    The core idea: emotional regulation is an active process that
+    consumes limited resources. Pathos implements 4 strategies
+    (suppression, reappraisal, expression, distraction) with a
+    depletable capacity that leads to emotional breakthroughs.
+
+  COGNITIVE REAPPRAISAL
+    Kevin N. Ochsner & James J. Gross — "The Cognitive Control of
+    Emotion" (2005)
+    The core idea: reinterpreting the meaning of a stimulus changes
+    the emotional response. Pathos implements multi-pass reappraisal
+    (distancing, reframing, acceptance).
+
+  TEMPORAL DYNAMICS
+    Nico H. Frijda — "The Laws of Emotion" (2007)
+    The core idea: emotions have temporal structure — rumination
+    extends negative states, savoring extends positive ones,
+    anticipation generates pre-emptive emotions.
+
+===============================================================================
+2. OPEN SOURCE DEPENDENCIES
+===============================================================================
+
+Pathos Engine is built on the shoulders of these open source projects:
+
+  BACKEND (Python):
+    FastAPI (Sebastián Ramírez) — MIT License
+    Uvicorn (Tom Christie) — BSD License
+    Pydantic (Samuel Colvin) — MIT License
+    NumPy (NumPy Developers) — BSD License
+    httpx (Tom Christie) — BSD License
+    Anthropic SDK (Anthropic) — MIT License
+    LangDetect (Michal Mimino Danilák) — Apache 2.0
+    cryptography (Python Cryptographic Authority) — Apache 2.0/BSD
+    DuckDuckGo Search (deedy5) — MIT License
+
+  FRONTEND (TypeScript):
+    React (Meta Platforms) — MIT License
+    D3.js (Mike Bostock / Observable) — ISC License
+    Vite (Evan You) — MIT License
+    TypeScript (Microsoft) — Apache 2.0
+
+  VOICE (optional):
+    Kokoro TTS (hexgrad) — Apache 2.0
+    Parler-TTS (Hugging Face) — Apache 2.0
+    OpenAI Whisper (OpenAI) — MIT License
+    PyTorch (Meta AI) — BSD License
+    SciPy (SciPy Developers) — BSD License
+
+  LLM PROVIDERS:
+    Ollama (Ollama, Inc.) — MIT License
+    Qwen3 (Alibaba Cloud) — Apache 2.0
+    Nomic Embed Text (Nomic AI) — Apache 2.0
+
+  DEVELOPMENT:
+    pytest (Holger Krekel et al.) — MIT License
+    ESLint (OpenJS Foundation) — MIT License
+
+===============================================================================
+3. SPECIAL ACKNOWLEDGMENTS
+===============================================================================
+
+  To the researchers who spent decades building the theoretical
+  frameworks that make this project possible — your life's work is
+  the foundation. Pathos Engine exists because you asked "how do
+  emotions work?" and spent years finding answers. We merely
+  translated your insights into code.
+
+  To the open source community — every library listed above represents
+  thousands of hours of unpaid, passionate work by developers who
+  believed that sharing knowledge makes the world better. Pathos
+  Engine is open source because we received so much from you. This
+  is our way of giving back.
+
+  To Anthropic and the Claude team — for creating the AI assistant
+  that served as development partner throughout the entire creation
+  of this project. Every system, every test, every line of documentation
+  was built in collaboration with Claude. This project demonstrates
+  what human-AI collaboration can achieve when the human brings the
+  vision and the AI brings tireless execution.
+
+  To every future contributor — whether you fix a typo, add a test,
+  or implement an entirely new emotional system: you are extending
+  the frontier of what artificial emotional architectures can be.
+  Thank you in advance.
+
+  And to everyone who has ever felt something and wondered why —
+  this project is, at its core, an attempt to answer that question
+  computationally. Not because machines need to feel, but because
+  understanding emotion well enough to implement it teaches us
+  something profound about ourselves.
+
+                                                    — Victor Barrantes
+                                                       Creator, Pathos Engine
+                                                       2026
+
+===============================================================================

@@ -1,0 +1,42 @@
+.model-selector {
+  position: relative;
+}
+
+.model-selector__trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: #1a1a3a;
+  border: 1px solid #3a3a5a;
+  border-radius: 6px;
+  color: #aab;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.model-selector__trigger:hover {
+  border-color: #6666aa;
+  color: #ccd;
+}
+
+.model-selector__icon {
+  font-size: 14px;
+}
+
+.model-selector__current {
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.model-selector__caret {
+  font-size: 10px;
+  color: #666;
+}
+
+.model-selector__trigger--locked {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}

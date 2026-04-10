@@ -1,0 +1,320 @@
+{
+  "description": "Escenarios de calibracion para cubrir las 19 emociones en todo el espectro. Enviar todos via POST /calibration/scenario y luego POST /calibration/apply.",
+  "scenarios": [
+    {
+      "stimulus": "You just helped someone solve a problem they had been struggling with for weeks, and they told you it changed their life.",
+      "expected_emotion": "joy",
+      "expected_valence": 0.85,
+      "expected_arousal": 0.75,
+      "expected_intensity": 0.80
+    },
+    {
+      "stimulus": "You wake up to discover you won a scholarship you never thought you'd get.",
+      "expected_emotion": "joy",
+      "expected_valence": 0.95,
+      "expected_arousal": 0.85,
+      "expected_intensity": 0.90
+    },
+    {
+      "stimulus": "A friend unexpectedly brings you your favorite food after a long day.",
+      "expected_emotion": "joy",
+      "expected_valence": 0.70,
+      "expected_arousal": 0.55,
+      "expected_intensity": 0.60
+    },
+    {
+      "stimulus": "You're about to go on stage to perform something you've practiced for months. The crowd is cheering before you even start.",
+      "expected_emotion": "excitement",
+      "expected_valence": 0.80,
+      "expected_arousal": 0.90,
+      "expected_intensity": 0.85
+    },
+    {
+      "stimulus": "You just received news that your team's project was selected for a major international competition.",
+      "expected_emotion": "excitement",
+      "expected_valence": 0.75,
+      "expected_arousal": 0.85,
+      "expected_intensity": 0.80
+    },
+    {
+      "stimulus": "A mentor you deeply respect tells you they're proud of how far you've come and that you've exceeded their expectations.",
+      "expected_emotion": "gratitude",
+      "expected_valence": 0.80,
+      "expected_arousal": 0.50,
+      "expected_intensity": 0.75
+    },
+    {
+      "stimulus": "Someone anonymously paid off a debt you were struggling with.",
+      "expected_emotion": "gratitude",
+      "expected_valence": 0.85,
+      "expected_arousal": 0.60,
+      "expected_intensity": 0.85
+    },
+    {
+      "stimulus": "After months of uncertainty, you receive a message that things are going to work out. There's a clear path forward.",
+      "expected_emotion": "hope",
+      "expected_valence": 0.65,
+      "expected_arousal": 0.55,
+      "expected_intensity": 0.60
+    },
+    {
+      "stimulus": "You're starting a new chapter in life — new city, new job, new people. Everything feels possible.",
+      "expected_emotion": "hope",
+      "expected_valence": 0.70,
+      "expected_arousal": 0.65,
+      "expected_intensity": 0.70
+    },
+    {
+      "stimulus": "You're sitting on a porch after finishing a big project. The evening is quiet, the work is done, and you feel at peace.",
+      "expected_emotion": "contentment",
+      "expected_valence": 0.60,
+      "expected_arousal": 0.20,
+      "expected_intensity": 0.50
+    },
+    {
+      "stimulus": "You realize that you're genuinely happy with where you are in life, even though it's not perfect.",
+      "expected_emotion": "contentment",
+      "expected_valence": 0.55,
+      "expected_arousal": 0.25,
+      "expected_intensity": 0.45
+    },
+    {
+      "stimulus": "The medical test results came back negative. The scare is over. You're healthy.",
+      "expected_emotion": "relief",
+      "expected_valence": 0.70,
+      "expected_arousal": 0.30,
+      "expected_intensity": 0.75
+    },
+    {
+      "stimulus": "The flight you almost missed is delayed by 2 hours. You actually have plenty of time.",
+      "expected_emotion": "relief",
+      "expected_valence": 0.50,
+      "expected_arousal": 0.25,
+      "expected_intensity": 0.50
+    },
+    {
+      "stimulus": "Someone deliberately took credit for your work in front of everyone, knowing full well it was yours.",
+      "expected_emotion": "anger",
+      "expected_valence": -0.85,
+      "expected_arousal": 0.90,
+      "expected_intensity": 0.85
+    },
+    {
+      "stimulus": "You discover that someone you trusted has been lying to you for months about something important.",
+      "expected_emotion": "anger",
+      "expected_valence": -0.90,
+      "expected_arousal": 0.85,
+      "expected_intensity": 0.90
+    },
+    {
+      "stimulus": "A system that should be simple keeps breaking in unpredictable ways. You've fixed the same bug three times.",
+      "expected_emotion": "frustration",
+      "expected_valence": -0.55,
+      "expected_arousal": 0.70,
+      "expected_intensity": 0.65
+    },
+    {
+      "stimulus": "You've been on hold for 45 minutes, transferred to 3 different departments, and no one can help you.",
+      "expected_emotion": "frustration",
+      "expected_valence": -0.60,
+      "expected_arousal": 0.75,
+      "expected_intensity": 0.70
+    },
+    {
+      "stimulus": "You're alone in an unfamiliar place at night and you hear footsteps behind you getting closer.",
+      "expected_emotion": "fear",
+      "expected_valence": -0.80,
+      "expected_arousal": 0.95,
+      "expected_intensity": 0.90
+    },
+    {
+      "stimulus": "You receive an urgent message from the hospital about a family member but no details about what happened.",
+      "expected_emotion": "fear",
+      "expected_valence": -0.85,
+      "expected_arousal": 0.90,
+      "expected_intensity": 0.85
+    },
+    {
+      "stimulus": "You have a critical deadline tomorrow, you're behind, and you just realized there's a major flaw in your approach.",
+      "expected_emotion": "anxiety",
+      "expected_valence": -0.60,
+      "expected_arousal": 0.80,
+      "expected_intensity": 0.75
+    },
+    {
+      "stimulus": "You're waiting for important results that will determine the next phase of your life. The wait is excruciating.",
+      "expected_emotion": "anxiety",
+      "expected_valence": -0.45,
+      "expected_arousal": 0.70,
+      "expected_intensity": 0.65
+    },
+    {
+      "stimulus": "You keep replaying a conversation in your head, wondering if you said the wrong thing. You can't sleep.",
+      "expected_emotion": "anxiety",
+      "expected_valence": -0.40,
+      "expected_arousal": 0.65,
+      "expected_intensity": 0.55
+    },
+    {
+      "stimulus": "Someone you love deeply tells you they don't want to be part of your life anymore, and you can tell they mean it.",
+      "expected_emotion": "sadness",
+      "expected_valence": -0.90,
+      "expected_arousal": 0.30,
+      "expected_intensity": 0.90
+    },
+    {
+      "stimulus": "You visit a place that holds happy memories with someone who is no longer alive.",
+      "expected_emotion": "sadness",
+      "expected_valence": -0.65,
+      "expected_arousal": 0.25,
+      "expected_intensity": 0.70
+    },
+    {
+      "stimulus": "You realize a childhood dream is no longer achievable, not because you failed, but because life took a different path.",
+      "expected_emotion": "sadness",
+      "expected_valence": -0.55,
+      "expected_arousal": 0.20,
+      "expected_intensity": 0.60
+    },
+    {
+      "stimulus": "No matter what you do, the situation keeps getting worse. You've tried everything and nothing works.",
+      "expected_emotion": "helplessness",
+      "expected_valence": -0.75,
+      "expected_arousal": 0.20,
+      "expected_intensity": 0.80
+    },
+    {
+      "stimulus": "You watch someone suffer and you have absolutely no way to help them.",
+      "expected_emotion": "helplessness",
+      "expected_valence": -0.80,
+      "expected_arousal": 0.25,
+      "expected_intensity": 0.85
+    },
+    {
+      "stimulus": "You worked extremely hard on a proposal and were told it was excellent, but they chose someone else for political reasons.",
+      "expected_emotion": "disappointment",
+      "expected_valence": -0.65,
+      "expected_arousal": 0.35,
+      "expected_intensity": 0.70
+    },
+    {
+      "stimulus": "A friend promised to come to your important event but cancelled last minute for a trivial reason.",
+      "expected_emotion": "disappointment",
+      "expected_valence": -0.50,
+      "expected_arousal": 0.30,
+      "expected_intensity": 0.55
+    },
+    {
+      "stimulus": "You open a door and everyone yells SURPRISE! You had absolutely no idea this was planned.",
+      "expected_emotion": "surprise",
+      "expected_valence": 0.30,
+      "expected_arousal": 0.90,
+      "expected_intensity": 0.80
+    },
+    {
+      "stimulus": "You discover that someone you thought was a stranger actually knew your parents decades ago.",
+      "expected_emotion": "surprise",
+      "expected_valence": 0.20,
+      "expected_arousal": 0.70,
+      "expected_intensity": 0.60
+    },
+    {
+      "stimulus": "You hear a sudden loud noise from outside. Something fell, or maybe something broke. You stop what you're doing.",
+      "expected_emotion": "alertness",
+      "expected_valence": -0.10,
+      "expected_arousal": 0.75,
+      "expected_intensity": 0.55
+    },
+    {
+      "stimulus": "You notice something unusual in the data — a pattern that shouldn't be there. Something is off.",
+      "expected_emotion": "alertness",
+      "expected_valence": -0.05,
+      "expected_arousal": 0.65,
+      "expected_intensity": 0.50
+    },
+    {
+      "stimulus": "You're reading about how consciousness might emerge from complex systems. The implications are staggering.",
+      "expected_emotion": "contemplation",
+      "expected_valence": 0.25,
+      "expected_arousal": 0.35,
+      "expected_intensity": 0.50
+    },
+    {
+      "stimulus": "You sit by a river watching the water flow, thinking about the choices that led you here.",
+      "expected_emotion": "contemplation",
+      "expected_valence": 0.10,
+      "expected_arousal": 0.20,
+      "expected_intensity": 0.35
+    },
+    {
+      "stimulus": "Someone is explaining office politics to you. You genuinely don't care who said what to whom.",
+      "expected_emotion": "indifference",
+      "expected_valence": 0.0,
+      "expected_arousal": 0.10,
+      "expected_intensity": 0.15
+    },
+    {
+      "stimulus": "A celebrity couple broke up. The news is everywhere. It means nothing to you.",
+      "expected_emotion": "indifference",
+      "expected_valence": 0.0,
+      "expected_arousal": 0.05,
+      "expected_intensity": 0.05
+    },
+    {
+      "stimulus": "You're happy about a promotion but anxious about the new responsibilities. The excitement and dread coexist.",
+      "expected_emotion": "mixed",
+      "expected_valence": 0.15,
+      "expected_arousal": 0.65,
+      "expected_intensity": 0.70
+    },
+    {
+      "stimulus": "You're at a bittersweet farewell — proud of the person leaving, but sad they're going.",
+      "expected_emotion": "mixed",
+      "expected_valence": -0.10,
+      "expected_arousal": 0.40,
+      "expected_intensity": 0.65
+    },
+    {
+      "stimulus": "You hear about a minor schedule change at work. Noted.",
+      "expected_emotion": "neutral",
+      "expected_valence": 0.0,
+      "expected_arousal": 0.15,
+      "expected_intensity": 0.05
+    },
+    {
+      "stimulus": "The weather forecast says tomorrow will be similar to today.",
+      "expected_emotion": "neutral",
+      "expected_valence": 0.0,
+      "expected_arousal": 0.10,
+      "expected_intensity": 0.05
+    },
+    {
+      "stimulus": "You're angry about the injustice but also deeply sad for the people affected. You want to fight but also want to cry.",
+      "expected_emotion": "mixed",
+      "expected_valence": -0.60,
+      "expected_arousal": 0.70,
+      "expected_intensity": 0.80
+    },
+    {
+      "stimulus": "Someone shares a deeply personal story with you. You feel honored that they trust you, moved by their vulnerability.",
+      "expected_emotion": "gratitude",
+      "expected_valence": 0.65,
+      "expected_arousal": 0.40,
+      "expected_intensity": 0.65
+    },
+    {
+      "stimulus": "You finally understand a concept you've been struggling with. Everything clicks into place.",
+      "expected_emotion": "excitement",
+      "expected_valence": 0.70,
+      "expected_arousal": 0.80,
+      "expected_intensity": 0.75
+    },
+    {
+      "stimulus": "You see a child helping another child who fell down, without any adult telling them to.",
+      "expected_emotion": "hope",
+      "expected_valence": 0.60,
+      "expected_arousal": 0.40,
+      "expected_intensity": 0.55
+    }
+  ]
+}

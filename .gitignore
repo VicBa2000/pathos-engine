@@ -1,0 +1,43 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment / secrets (NEVER commit API keys)
+.env
+.env.*
+*.secret
+*.key
+*.pem
+credentials.json
+
+# Encryption key (auto-generated, never commit)
+.pathos_key
+
+# Node
+node_modules/
+
+# Claude Code session data
+.claude/
+
+# Audio test files (binary, not needed in repo)
+*.wav
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Runtime
+*.log
+saves/

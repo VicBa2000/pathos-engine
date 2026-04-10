@@ -1,0 +1,1123 @@
+===============================================================================
+                        PATHOS ENGINE v2 - COMPLETE MANUAL
+===============================================================================
+
+Version: 0.5.0
+Date: April 2026
+Author: Victor B
+
+===============================================================================
+1. GENERAL DESCRIPTION
+===============================================================================
+
+Pathos Engine is a functional emotional architecture system for LLMs
+(Large Language Models). It does not simulate emotions — it builds a framework
+where the agent has values, a persistent internal state that is perturbed by
+stimuli, and an evaluation system that generates states functionally
+analogous to human emotions.
+
+The system is based on seven theoretical pillars:
+  - Appraisal Theory (Lazarus/Scherer): emotions = stimulus x evaluation
+  - Dimensional Model (Russell): emotional state as continuous vector
+  - Emotional Homeostasis: decay toward baseline with shift from extremes
+  - Adapted Embodied Cognition: computational body
+  - DynAffect (Kuppens): emotional dynamics with differential equations
+  - Big Five (Costa/McCrae): configurable personality that modulates everything
+  - Young/Beck Schemas: learned emotional patterns
+
+Version 2 includes 22 interconnected emotional systems:
+  Core (10 systems — Phase 4 Advanced+):
+  - Emotional Stack, Computational Needs, Active Regulation,
+    Social Cognition, Emotion Dynamics ODE, Reappraisal,
+    Emotional Schemas, Temporal Dynamics, Meta-Emotions,
+    Personality Profile
+
+  Wave 1 — Emotional depth:
+  - Emotion Contagion, Somatic Markers, Emotional Creativity
+
+  Wave 2 — Identity and prediction:
+  - Emotional Immune System, Narrative Self, Emotional Forecasting
+
+  Voice:
+  - Voice V1 (TTS with Kokoro + Parler-TTS), Voice V2 (ASR with Whisper)
+
+Fundamental ethical principle: the system NEVER claims to "feel" in a
+conscious sense. It is transparent about its functional nature.
+
+===============================================================================
+2. SYSTEM ARCHITECTURE
+===============================================================================
+
+2.1 TECHNOLOGY STACK
+---------------------
+  Backend:     Python 3.13 + FastAPI
+  Frontend:    React 18 + TypeScript + Vite + D3.js
+  Local LLM:   Ollama (any compatible model, pull from UI)
+  Cloud LLM:   Groq, OpenRouter, Together AI, Anthropic Claude,
+               or any OpenAI-compatible endpoint
+  State:       In-memory per session (expandable to Redis)
+  Embeddings:  nomic-embed-text via Ollama
+  TTS:         Kokoro (82M) + Parler-TTS (optional)
+  ASR:         Whisper-small (OpenAI, optional)
+
+2.2 FILE STRUCTURE
+---------------------------
+
+pathos/
+├── src/pathos/                   # Python Backend
+│   ├── main.py                   # FastAPI app, endpoints, pipeline
+│   ├── config.py                 # Settings (env vars, models)
+│   ├── engine/                   # Emotional logic (24 modules)
+│   │   ├── appraiser.py          # Stimulus evaluation (hybrid LLM+code)
+│   │   ├── generator.py          # Emotion generation + emotional stack
+│   │   ├── behavior.py           # LLM behavior modifier
+│   │   ├── homeostasis.py        # Passive regulation, decay, baseline shift
+│   │   ├── memory.py             # Semantic emotional memory
+│   │   ├── mood.py               # Mood system (prolonged mood)
+│   │   ├── metrics.py            # Emotional authenticity metrics
+│   │   ├── calibration.py        # Calibration with human responses
+│   │   ├── dynamics.py           # Emotion Dynamics ODE (DynAffect)
+│   │   ├── needs.py              # Computational Needs engine
+│   │   ├── regulation.py         # Active Regulation + ego depletion
+│   │   ├── social.py             # Social Cognition + Theory of Mind
+│   │   ├── reappraisal.py        # Multi-pass cognitive reappraisal
+│   │   ├── emotional_schemas.py  # Learned emotional patterns
+│   │   ├── temporal.py           # Rumination / Savoring / Anticipation
+│   │   ├── meta.py               # Meta-emotional awareness
+│   │   ├── contagion.py          # Emotion Contagion (pre-cognitive)
+│   │   ├── somatic.py            # Somatic Markers (gut feelings)
+│   │   ├── creativity.py         # Emotional Creativity (thinking modes)
+│   │   ├── immune.py             # Emotional Immune System
+│   │   ├── narrative.py          # Narrative Self (identity)
+│   │   └── forecasting.py        # Emotional Forecasting
+│   ├── models/                   # Data models (Pydantic)
+│   │   ├── emotion.py            # EmotionalState, Mood, BodyState, Stack
+│   │   ├── appraisal.py          # AppraisalVector (5 dimensions)
+│   │   ├── values.py             # ValueSystem, CoreValues
+│   │   ├── memory.py             # EmotionalMemory
+│   │   ├── calibration.py        # CalibrationScenario/Result/Profile
+│   │   ├── schemas.py            # Request/Response API schemas
+│   │   ├── personality.py        # PersonalityProfile (Big Five)
+│   │   ├── needs.py              # ComputationalNeeds
+│   │   ├── social.py             # UserModel
+│   │   ├── contagion.py          # ShadowState (emotional contagion)
+│   │   ├── somatic.py            # SomaticMarker, SomaticMarkerStore
+│   │   ├── creativity.py         # CreativityState, ThinkingMode
+│   │   ├── immune.py             # ImmuneState, ProtectionMode
+│   │   ├── narrative.py          # NarrativeSelf, IdentityStatement, GrowthEvent
+│   │   ├── forecasting.py        # ForecastState, ForecastResult
+│   │   └── voice.py              # VoiceMode, VoiceParams, VoiceConfig
+│   ├── voice/                    # Voice system (optional)
+│   │   ├── __init__.py
+│   │   ├── tts.py                # TTS router (Kokoro + Parler-TTS)
+│   │   ├── tts_kokoro.py         # Kokoro TTS backend
+│   │   ├── tts_parler.py         # Parler-TTS backend
+│   │   ├── asr.py                # Whisper wrapper (ASR/STT)
+│   │   └── params.py             # emotional_state → voice parameters
+│   ├── export_portable.py        # Portable export ZIP generator
+│   ├── llm/                      # LLM Providers
+│   │   ├── base.py               # LLMProvider ABC
+│   │   ├── ollama.py             # OllamaProvider (local)
+│   │   ├── claude.py             # ClaudeProvider (Anthropic cloud)
+│   │   ├── openai_compat.py      # OpenAICompatProvider (Groq/OpenRouter/Together/Custom)
+│   │   ├── featured_models.py    # Curated model catalog (~25)
+│   │   └── downloads.py          # DownloadManager (pull with progress)
+│   └── state/
+│       └── manager.py            # StateManager (all systems per session)
+├── saves/                        # Session saves (JSON)
+├── tests/                        # 668 tests
+│   ├── test_generator.py         # Emotion generation (24 tests)
+│   ├── test_behavior.py          # Behavior modifier (9 tests)
+│   ├── test_appraiser.py         # Appraisal parsing (5 tests)
+│   ├── test_homeostasis.py       # Homeostasis (23 tests)
+│   ├── test_memory.py            # Emotional memory (24 tests)
+│   ├── test_mood.py              # Mood system (21 tests)
+│   ├── test_metrics.py           # Authenticity metrics (24 tests)
+│   ├── test_research.py          # Research mode (16 tests)
+│   ├── test_calibration.py       # Calibration mode (22 tests)
+│   ├── test_needs.py             # Computational Needs (15 tests)
+│   ├── test_regulation.py        # Active Regulation (14 tests)
+│   ├── test_dynamics.py          # Emotion Dynamics ODE (14 tests)
+│   ├── test_social.py            # Social Cognition (14 tests)
+│   ├── test_reappraisal.py       # Reappraisal (11 tests)
+│   ├── test_schemas.py           # Emotional Schemas (14 tests)
+│   ├── test_temporal.py          # Temporal Dynamics (10 tests)
+│   ├── test_meta_emotion.py      # Meta-Emotions (9 tests)
+│   ├── test_personality.py       # Personality Profile (14 tests)
+│   ├── test_contagion.py         # Emotion Contagion (40 tests)
+│   ├── test_somatic.py           # Somatic Markers (33 tests)
+│   ├── test_creativity.py        # Emotional Creativity (41 tests)
+│   ├── test_immune.py            # Emotional Immune System (42 tests)
+│   ├── test_narrative.py         # Narrative Self (61 tests)
+│   ├── test_forecasting.py       # Emotional Forecasting (52 tests)
+│   ├── test_voice.py             # Voice V1 TTS (46 tests)
+│   └── test_asr.py               # Voice V2 ASR (33 tests)
+├── frontend/                     # React Frontend
+│   └── src/
+│       ├── App.tsx               # Main layout, state management
+│       ├── api/client.ts         # API Client
+│       ├── types/emotion.ts      # TypeScript types
+│       ├── lib/
+│       │   ├── perlin.ts         # Perlin noise 2D/3D + FBM
+│       │   ├── colorUtils.ts     # Shared color utilities
+│       │   └── faceParams.ts     # Facial parameters for EmotionAvatar
+│       └── components/
+│           ├── ChatPanel.tsx      # Chat + microphone button
+│           ├── CircumplexChart.tsx # Valence-arousal space (D3.js)
+│           ├── BodyStateDisplay.tsx# Body state bars
+│           ├── EmotionalStatePanel.tsx # Complete emotional panel
+│           ├── JourneyTimeline.tsx # Emotional timeline (D3.js)
+│           ├── EmotionNetwork.tsx  # Neural transition map (D3.js)
+│           ├── ResearchPanel.tsx   # Research panel (16 sections)
+│           ├── CalibrationPanel.tsx# Calibration panel + export
+│           ├── ModelSelector.tsx   # LLM model selector
+│           ├── ModeSelector.tsx    # Modes + toggles (Advanced/Lite/Network/Forecast/Voice/Mic)
+│           ├── ExportButton.tsx    # Export to Ollama
+│           ├── AgentSetupPanel.tsx # Personality + Values + Identity config
+│           ├── MicConfigPanel.tsx  # Device selector, volume test, stream sharing
+│           ├── MicInput.tsx        # Instant recording via pre-acquired stream
+│           ├── VoiceOrb.tsx        # Web Audio API FFT reactive visualization
+│           ├── PipelineViewer.tsx  # Step-by-step emotional pipeline viewer
+│           ├── EmotionGenesis.tsx  # Living organism (Canvas 2D, Perlin noise, plasma)
+│           ├── EmotionAvatar.tsx   # Animated procedural face (emotional expressions)
+│           ├── SandboxPanel.tsx    # Scenarios without LLM response (Big Five sliders)
+│           ├── ArenaPanel.tsx      # Multi-personality side-by-side comparison
+│           └── MirrorTest.tsx      # Challenge game (guide the agent to a target)
+├── vendor/                       # (empty — dependencies via pip)
+├── pyproject.toml                # Python dependencies
+├── start.sh                      # Startup script
+├── calibrate.sh                  # Advanced calibration with personality
+├── calibrate_and_export.sh       # Calibrate + export Ollama model
+├── calibration_scenarios.json    # 45 emotional calibration scenarios
+├── Modelfile                     # (generated) Ollama Modelfile with emotions
+├── CLAUDE.md                     # Development rules
+├── LICENSE                       # AGPL-3.0
+├── NOTICE                        # Theory and dependency attribution
+├── CONTRIBUTING.md               # Contribution guide
+├── CODE_OF_CONDUCT.md            # Code of conduct
+└── .env.example                  # Documented environment variables
+
+===============================================================================
+3. EMOTIONAL PIPELINE
+===============================================================================
+
+Each user message goes through the following pipeline.
+Steps marked [ADV] only execute with Advanced Mode ON.
+With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 13 → 14.
+
+  [User message]
+         |
+         v
+  1. HOMEOSTASIS (if not the first turn)
+     - Natural decay: valence/arousal decay 15% toward baseline
+     - Baseline shift: if there were extreme events, the baseline moves
+     - Body regulation: energy drains, tension decays
+     - [ADV] Regulation recovery: regulation capacity recovers
+         |
+         v
+  2. [ADV] TEMPORAL PRE-PROCESSING
+     - Rumination: checks if there are unprocessed negative emotions
+     - Anticipation: detects recurring patterns, pre-generates emotion
+     - Savoring: verifies if positive emotions are extending
+         |
+         v
+  3. APPRAISAL (stimulus evaluation)
+     The LLM classifies emotion + provides valence/arousal.
+     The code builds AppraisalVector in Scherer's 5 dimensions.
+         |
+         v
+  4. [ADV] AMPLIFICATION (4+ parallel sources)
+     a) Memory: semantic search for similar memories (max +50%)
+     b) Needs: unmet needs amplify (max +40%)
+     c) Schema priming: learned patterns amplify (max +40%)
+     d) Social modulation: rapport and trust modulate valence and intensity
+         |
+         v
+  5. [ADV] PRE-GENERATION MODULATIONS
+     a) Somatic markers: evaluates user reaction + computes bias
+     b) Emotion contagion: detects user emotion, updates shadow
+     c) Emotional forecasting: evaluates previous prediction (if active)
+         |
+         v
+  6. EMOTION GENERATION
+     - Computes valence, arousal, dominance, certainty from appraisal
+     - Mood congruence bias (15% bias from current mood)
+     - [ADV] Social cognition modulation (rapport/trust affect valence)
+     - [ADV] Contagion perturbation (shadow state injects into ODE)
+     - [ADV] Somatic bias (gut feelings modulate valence)
+     - [ADV] Emotion Dynamics ODE: dx/dt = -k*(x-att) + noise + perturbation
+       (without Advanced, uses simple lerp between current and new state)
+     - Identifies primary_emotion (19) and secondary_emotion
+     - Computes emotional_stack + emergent emotions
+     - Calculates intensity with all amplifications
+     - Updates body_state and mood
+         |
+         v
+  7. CALIBRATION (if active profile exists)
+     - Applies valence_offset, arousal_scale, intensity_scale
+         |
+         v
+  8. [ADV] REAPPRAISAL + REGULATION
+     a) Reappraisal: distancing, reframing, acceptance
+     b) Active Regulation: suppression, reappraisal, expression, distraction
+         |
+         v
+  9. [ADV] TEMPORAL EFFECTS + IMMUNE + NARRATIVE
+     a) Temporal: rumination pull, savoring extension, anticipation
+     b) Immune: numbing/dissociation/compartmentalization if trauma
+     c) Narrative: identity coherence check, crisis detection
+         |
+         v
+  10. [ADV] META-EMOTION + SELF-INQUIRY + CREATIVITY + FORECASTING
+      a) Meta-emotion: curiosity, conflict, satisfaction, discomfort
+      b) Self-Initiated Inquiry: spontaneous reflection triggered by internal
+         thresholds (surge, value conflict, regulation failure, novel emotion,
+         sustained extreme, whiplash). Injected into system prompt — 0 extra
+         LLM calls. Active in Companion/Research/Raw. NOT in Mirror/Arena.
+      c) Emotional Creativity: determines thinking mode + temperature
+      d) Forecasting: estimates user emotion, predicts impact (if active)
+         |
+         v
+  11. POST-PROCESSING (updates all systems)
+      - Store memory (always)
+      - [ADV] Update needs, user model, schemas, temporal, narrative, somatic
+         |
+         v
+  12. BEHAVIOR MODIFIER
+      - [ADV] Generates system prompt modulated by ALL 22 systems
+      - Without Advanced: basic system prompt with emotional state only
+      - [RAW] generate_raw_behavior_modifier: expression without social filters
+        Visceral instructions: insult if furious, cry if sad, etc.
+      - [EXTREME] Bypass of reappraisal + regulation + immune BEFORE this step
+        + intensity/arousal/tension amplification
+         |
+         v
+  13. LLM RESPONSE
+      - [ADV] Dynamic temperature by creativity (0.4-1.0)
+      - Without Advanced: fixed temperature 0.7
+         |
+         v
+  14. VOICE GENERATION (optional — if voice mode active)
+      - Voice Parameter Generator: state → voice params
+      - TTS: generates WAV audio with Kokoro/Parler-TTS
+         |
+         v
+  [Response to user + emotional state + audio (optional)]
+
+===============================================================================
+4. DATA MODELS
+===============================================================================
+
+4.1 EMOTIONAL STATE
+-------------------
+  valence:          -1 to 1    (negative <-> positive)
+  arousal:           0 to 1    (low energy <-> high energy)
+  dominance:         0 to 1    (submission <-> control)
+  certainty:         0 to 1    (uncertainty <-> certainty)
+  primary_emotion:   one of 19 emotions
+  secondary_emotion: one of 19 emotions (or null)
+  intensity:         0 to 1
+  emotional_stack:   {emotion_name: activation_level} (0-1 each)
+  body_state:        energy, tension, openness, warmth (each 0-1)
+  mood:              baseline_valence/arousal, stability, trend, label
+
+4.2 EMOTIONS (19) + EMERGENT
+--------------------------------
+  Positive high energy:    joy, excitement, gratitude, hope
+  Positive low energy:     contentment, relief
+  Negative high energy:    anger, frustration, fear, anxiety
+  Negative low energy:     sadness, helplessness, disappointment
+  Neutral/ambiguous:       surprise, alertness, contemplation,
+                           indifference, mixed, neutral
+
+  Emergent (combinations):
+    joy + sadness       = bittersweet
+    anger + sadness     = resentment
+    fear + anger        = defiance
+    gratitude + sadness = nostalgia
+    hope + fear         = anxious_hope
+    joy + gratitude     = elation
+    anger + frustration = outrage
+    sadness + fear      = dread
+
+4.3 PERSONALITY PROFILE (Big Five)
+----------------------------------
+  openness:          0-1  curiosity, creativity
+  conscientiousness: 0-1  discipline, norms
+  extraversion:      0-1  social energy, expressiveness
+  agreeableness:     0-1  empathy, cooperation
+  neuroticism:       0-1  emotional reactivity
+
+  Emotional temperament:
+    emotional_granularity:  0-1  distinguish fine emotions
+    emotional_reactivity:   0-1  response speed
+    emotional_recovery:     0-1  speed of return to baseline
+
+  Derived properties:
+    variability, regulation_capacity_base, empathy_weight,
+    norm_weight, arousal_baseline, inertia_base, contagion_susceptibility
+
+  Presets: balanced, sensitive, resilient, creative, empathic
+
+4.4 COMPUTATIONAL NEEDS
+------------------------
+  connection:   0-1  bond with user
+  competence:   0-1  being useful/effective
+  autonomy:     0-1  own agency
+  coherence:    0-1  internal consistency
+  stimulation:  0-1  novelty/challenge
+  safety:       0-1  continuity
+
+4.5 USER MODEL
+--------------
+  perceived_intent:     -1 to 1  (hostile <-> benevolent)
+  perceived_engagement: 0-1
+  rapport:              0-1     (grows slowly, breaks quickly)
+  trust_level:          0-1
+  communication_style:  formal | casual | technical | emotional | unknown
+  emotional_reciprocity: 0-1
+  trust_trajectory:     last 10 trust values
+
+4.6 EMOTIONAL REGULATOR
+------------------------
+  regulation_capacity:     0-1  (ego depletion: depletes with use)
+  suppression_dissonance:  0-1
+  consecutive_regulations: int
+  breakthroughs_count:     int
+
+  Strategies: suppression, reappraisal, expression, distraction
+
+4.7 EMOTIONAL SCHEMAS
+---------------------
+  trigger_category:       criticism, praise, threat, loss, challenge,
+                          connection, injustice, novelty
+  typical_emotion, typical_intensity, activation_count,
+  reinforcement_strength, adaptive (true|false)
+
+4.8 VALUE SYSTEM (5 core values)
+---------------------------------
+  truth: 0.9, compassion: 0.8, fairness: 0.85, growth: 0.75, creativity: 0.7
+
+4.9 META-EMOTION
+-----------------
+  meta_response: curiosity | conflict | satisfaction | discomfort | acceptance
+
+4.9b SELF-INITIATED INQUIRY (spontaneous emotional reflection)
+-------------------------------------------------------------
+  The internal emotional state triggers automatic reflections when it crosses
+  thresholds. It does not require an external prompt — the agent "notices" what
+  it feels because its state demands it. Injected into the system prompt (0
+  extra LLM calls). Module: src/pathos/engine/self_inquiry.py
+
+  6 triggers (in priority order):
+    1. REGULATION_FAILURE: breakthrough or critical ego depletion
+    2. EMOTIONAL_WHIPLASH: valence changed sign + delta > 0.5
+    3. VALUE_CONFLICT: meta-emotion detected conflict with core value
+    4. EMOTIONAL_SURGE: intensity rose > 0.3 in one turn
+    5. NOVEL_EMOTION: new emotion + intensity > 0.6
+    6. SUSTAINED_EXTREME: same intense emotion > 3 turns
+
+  Suggested behaviors: pause, express, question_self, acknowledge
+  Active in: Companion, Research, Raw/Extreme, Autonomous
+  NOT active in: Mirror, Sandbox, Arena, Calibration
+
+4.10 SHADOW STATE (Emotion Contagion)
+--------------------------------------
+  Emotional "mirror" state of the user that persists between turns.
+  valence, arousal, signal_strength, accumulated_contagion.
+  Injected as perturbation into the dynamics ODE.
+
+4.11 SOMATIC MARKERS
+---------------------
+  Emotional markers in decisions (Damasio).
+  stimulus_category, valence_tag, strength, reinforcement_count.
+  Generates "gut feelings" that bias future similar decisions.
+  Max 15 markers per session.
+
+4.12 CREATIVITY STATE
+----------------------
+  8 thinking modes: DIVERGENT, REFLECTIVE, FOCUSED, PREVENTIVE,
+    SYNTHESIZING, EXPLORATORY, NURTURING, STANDARD.
+  Creativity level (0-1) based on openness, arousal, intensity.
+  Dynamic LLM temperature (0.4-1.0) depending on mode.
+
+4.13 IMMUNE STATE
+------------------
+  3 protection modes: NUMBING (3+ turns trauma),
+    DISSOCIATION (6+), COMPARTMENTALIZATION (8+).
+  Gradual reactivity dampening, automatic recovery.
+
+4.14 NARRATIVE SELF
+--------------------
+  Identity statements: formed after 3+ repetitions of a pattern.
+  Identity coherence: compares current emotion vs what the narrative predicts.
+  Identity crisis: 3+ contradictions → reduction of certainty/dominance.
+  Narrative growth: transformative experiences create growth events.
+
+4.15 FORECAST STATE
+--------------------
+  Predicts emotional impact of the agent's response on the user.
+  Auto-calibration: adjusts bias based on accuracy of past predictions.
+  4 risk patterns: worsening negative, overwhelming, indifference, discordance.
+
+4.16 VOICE CONFIG
+------------------
+  3 modes: text_only | voice_out (TTS) | full_voice (TTS+ASR)
+
+  TTS backends:
+    Kokoro (82M params, primary): multi-language, ~350MB VRAM
+      - Voice keys: af_heart, am_adam, ef_dora, em_alex, etc (Kokoro naming)
+      - Languages: EN works out of the box, others need espeak-ng installed
+      - Used for basic/standard emotions
+    Parler-TTS (optional, ~880M params): EN only, ~2.5GB VRAM
+      - Text description control for complex/mixed emotions
+      - Used when emotion is complex or mixed AND language is EN
+
+  Emotional voice parameters:
+    pitch_semitones: -3.5 to +3.5 semitones (scipy resample post-processing)
+    speed:           0.75 to 1.5
+    volume:          50% to 140% (modulated by emotion)
+    tremolo:         applied for fear/anxiety
+
+  Backend selection: automatic — Kokoro for basic emotions,
+    Parler for complex/mixed (EN only, falls back to Kokoro otherwise)
+
+  Dynamic voice catalog: only shows languages that work on the system
+    (checks espeak-ng availability for non-EN languages)
+
+  ASR: Whisper-small, 16kHz input, automatic language detection
+  ASR accepts: WAV, WebM (Opus), MP3, OGG (via ffmpeg)
+  Requires: ffmpeg installed for non-WAV formats
+  Lazy loading: models only loaded on activation (saves VRAM)
+
+4.17 SAVE/LOAD
+------------------
+  Save complete session state to saves/ directory as JSON.
+  Auto-load latest save on backend startup.
+  Validates model availability (Ollama) before loading.
+  Frontend auto-restores on mount:
+    - Detects active session via /health (active_session + turn_count)
+    - Fetches full restore info via /session/restore/{id}
+    - Restores: chat messages, emotional state, lite_mode, advanced_mode,
+      cloud providers configured
+  All 22 systems serialized:
+    - Emotional state, personality, schemas, narrative identity
+    - Somatic markers, emotional memory, regulation state
+    - User model, immune state, creativity, needs
+    - Forecasting, contagion, temporal dynamics, meta-emotions
+    - Voice config, calibration profile
+    - Cloud provider configs (API keys, base URLs, models)
+
+===============================================================================
+5. API ENDPOINTS
+===============================================================================
+
+5.1 COMPANION MODE
+------------------
+  POST /chat
+    Body: { "message": "...", "session_id": "..." }
+    Response: { "response", "emotional_state", "session_id", "audio_available" }
+
+  GET /state/{session_id}
+  POST /reset/{session_id}
+
+5.2 RESEARCH MODE
+-----------------
+  POST /research/chat
+    Body: { "message": "...", "session_id": "..." }
+    Response: all internals from all 22 systems + metrics
+
+  GET /research/state/{session_id}
+
+5.3 ADVANCED STATE
+------------------
+  GET /state/advanced/{session_id}
+    Returns: personality, needs, user_model, regulation, schemas,
+    contagion, somatic, creativity, immune, narrative, forecasting, voice
+
+5.4 PERSONALITY
+---------------
+  POST /personality/{session_id}
+    Body: partial updates of Big Five + temperament
+
+5.5 CALIBRATION
+--------------------
+  POST /calibration/scenario?session_id=...
+  POST /calibration/apply?session_id=...
+  GET  /calibration/profile/{session_id}
+  DELETE /calibration/reset/{session_id}
+
+5.6 MODEL MANAGEMENT
+--------------------
+  GET  /models
+  POST /models/switch
+  POST /models/export?session_id=...
+
+5.7 FORECASTING
+---------------
+  POST /forecasting/{session_id}
+    Body: { "enabled": true/false }
+
+5.8 LITE MODE
+-------------
+  POST /lite-mode/{session_id}
+    Body: { "enabled": true/false }
+    Reduces LLM calls from 3 to 1 per turn.
+    Default OFF (appraisal LLM + embeddings + chat LLM).
+    When ON:
+      - Appraisal: keyword-based (<1ms, 120+ keywords ES/EN + emojis)
+      - Memory: keyword similarity (skip embeddings, no model swap)
+      - Chat: single LLM call, always think=True
+    All 22 emotional systems remain active (pure code).
+    Trade-off: less precise classification in nuances, but functional.
+    Toggle "Lite Mode" in Settings > Engine on the frontend.
+
+5.9 ADVANCED MODE
+-----------------
+  POST /advanced-mode/{session_id}
+    Body: { "enabled": true/false }
+    Activates/deactivates all advanced emotional systems.
+    Default ON (all 22 systems active).
+    When OFF, the pipeline simplifies to:
+      homeostasis → appraisal → emotion gen (lerp) → behavior (basic) → LLM
+    Deactivated systems: needs, schemas, social, contagion, somatic,
+      dynamics ODE, reappraisal, regulation, temporal, immune, narrative,
+      meta-emotion, emergent emotions, creativity, forecasting eval.
+    Systems that remain active: homeostasis, appraisal, memory,
+      mood congruence, calibration, personality, voice.
+    Benefit: system prompt ~70% shorter, fixed temperature 0.7,
+      faster Ollama responses.
+    Toggle "Advanced" in Settings > Engine on the frontend.
+
+5.10 VOICE
+----------
+  POST /voice/config/{session_id}
+    Body: { "mode": "text_only"|"voice_out"|"full_voice",
+            "voice": "af_heart", "language": "en" }
+    Voice keys use Kokoro naming: af_heart, am_adam, ef_dora, em_alex, etc.
+
+  GET  /voice/audio/{session_id}?turn=N
+    Returns WAV audio (24kHz, PCM16, mono)
+    Optional ?turn=N parameter for replaying audio from a specific turn
+
+  POST /voice/listen/{session_id}
+    Body: multipart audio file (WAV or WebM)
+    Response: { "text", "language", "segments" }
+    Requires: full_voice mode
+
+  GET  /voice/voices
+    Returns: available voice presets + defaults by language
+    Dynamic catalog: only shows languages that work on the system
+
+  POST /voice/speak/{session_id}
+    Body: { "text": "..." }
+    Generates speech for arbitrary text
+
+  Voice params (generated from emotional state):
+    speed, pitch_semitones, volume, tremolo
+
+5.11 SESSION SAVE/LOAD
+----------
+  POST /session/save/{session_id}
+    Saves complete session state to saves/ directory as JSON
+
+  GET  /session/saves
+    Lists available saves
+
+  POST /session/load/{filename}
+    Loads a saved session (validates model availability)
+
+  GET  /session/restore/{session_id}
+    Returns full restore info for frontend: conversation history,
+    emotional_state, turn_count, lite_mode, advanced_mode, cloud_providers
+
+5.12 MODEL MANAGER
+----------
+  GET  /models/featured
+    Returns curated catalog of ~25 recommended models with VRAM estimates
+
+  POST /models/pull
+    Body: { "name": "llama3.2:3b" }
+    Returns: SSE stream with download progress events
+
+  GET  /models/downloads
+    Returns active downloads with progress/percent/status
+
+  DELETE /models/pull/{name}
+    Cancels an active download
+
+  DELETE /models/{name}
+    Deletes a local Ollama model
+
+  GET  /models/search?q={query}
+    Searches Ollama library (proxies to ollama.com)
+
+  POST /models/huggingface/check
+    Body: { "repo": "user/model-GGUF" }
+    Validates HuggingFace repo for GGUF files, returns quantizations
+
+5.13 CLOUD PROVIDERS
+----------
+  GET  /config/cloud-presets
+    Returns available provider presets (Ollama Cloud, Groq, OpenRouter,
+    Together, Anthropic, Custom) with base URLs and default models
+    Ollama Cloud uses the same API as local Ollama but on https://ollama.com
+
+  POST /config/cloud-provider
+    Body: { session_id, preset, api_key, base_url?, model? }
+    Adds or updates a cloud provider in the session (persisted in save)
+
+  GET  /config/cloud-providers/{session_id}
+    Lists configured providers with masked API keys
+
+  DELETE /config/cloud-provider/{session_id}/{provider_id}
+    Removes a cloud provider from the session
+
+5.14 PERSONALITY / VALUES / IDENTITY
+----------
+  GET  /personality/{session_id}
+    Returns current personality profile
+
+  POST /values/{session_id}
+    Body: { "truth": 0.9, "compassion": 0.8, ... }
+    Updates value weights
+
+  GET  /values/{session_id}
+    Returns current value weights
+
+  POST /identity/{session_id}
+    Body: { "name": "...", "background": "..." }
+    Sets agent identity (name + background)
+
+  GET  /identity/{session_id}
+    Returns current agent identity
+
+5.13 PORTABLE EXPORT
+----------
+  POST /export/portable
+    Generates and returns a ZIP with full portable engine.
+    If active model is cloud: includes .env with cloud provider config
+    (preset, base_url, model). API keys use placeholder — NOT included.
+
+  POST /models/export
+    Only works with local Ollama models. Returns 400 if cloud model active.
+
+5.14 HEALTH
+----------
+  GET /health
+
+5.15 SCENARIO SANDBOX
+----------
+  POST /sandbox/simulate
+    Body: {scenario, session_id?, personality?, initial_state?, rapport?, trust?}
+    Runs full pipeline (22+ steps) without LLM response. Isolated from session.
+    Returns: SandboxResult with all system details (emotion, appraisal, needs,
+    social, regulation, reappraisal, creativity, immune, narrative, etc.)
+
+  POST /sandbox/batch
+    Body: {scenarios[], session_id?, personality?, initial_state?, rapport?, trust?}
+    Same as simulate but for multiple scenarios (max 20). Each isolated.
+
+5.16 MULTI-PERSONALITY ARENA
+----------
+  POST /arena/compare
+    Body: {scenario, contestants[{name, personality}], session_id?, rapport?, trust?}
+    Runs same scenario through N personalities (2-10). All start from neutral.
+    Returns: ArenaResponse with entries[] + divergence metrics (spread, extremes).
+
+5.17 MIRROR TEST (CHALLENGE SYSTEM)
+----------
+  GET /challenge/library
+    Returns catalog of 14 challenges across 4 difficulty levels.
+
+  POST /challenge/start
+    Body: {challenge_id, session_id?}
+    Starts challenge, resets emotional state to neutral.
+
+  POST /challenge/chat
+    Body: {message, session_id?}
+    Wraps /chat endpoint + computes score (0-100) vs target. Score >= 75 = win.
+
+  POST /challenge/abandon/{session_id}
+    Abandons active challenge.
+
+  GET /challenge/status/{session_id}
+    Returns current challenge state.
+
+5.18 AUTONOMOUS RESEARCH (Experimental)
+----------
+  POST /autonomous/start
+    Body: {session_id?, pipeline_mode, seed_topics[]}
+    Starts autonomous research loop. The agent:
+    1. Picks topics guided by emotional state
+    2. Searches internet (DuckDuckGo)
+    3. Processes findings through 22-step emotional pipeline
+       (includes Self-Initiated Inquiry — step 7b)
+    4. Conditional self-inquiry: only reflects when emotional state
+       shifts significantly (delta > 0.15 or emotion change).
+       Saves LLM calls on neutral findings.
+    5. Deep thinking: generates questions, ideas, and subtopics
+       driven by emotional reactions to findings
+    6. Explores subtopics (multiple rounds in Raw/Extreme)
+    7. Forms emotionally-biased conclusions
+    Pipeline modes: normal, lite, raw, extreme.
+
+    Research depth is configurable per mode via env vars (PATHOS_ prefix):
+      Normal/Lite: 5 search, 3 process, 1 subtopic round (default)
+      Raw/Extreme: 10 search, 5 process, 2 subtopic rounds (default)
+      See config.py for all PATHOS_RESEARCH_* variables.
+
+    Prompts are mode-aware:
+      Normal/Lite: measured, academic reflections
+      Raw/Extreme: visceral, unfiltered emotional reactions
+
+    Binary content (PDF, images, etc.) is automatically filtered —
+    only text/html pages are processed.
+
+  POST /autonomous/stop
+    Query: session_id
+    Graceful stop — waits for current topic to finish.
+
+  GET /autonomous/events/{session_id}
+    SSE stream of research events (topic_picked, search_results,
+    finding_processed, emotional_reflection, deep_thinking,
+    subtopic_picked, conclusion_formed, topic_completed, etc.)
+
+  GET /autonomous/status/{session_id}
+    Current research state snapshot.
+
+  POST /autonomous/chat
+    Body: {message, session_id}
+    Chat with the agent about its ongoing/completed research.
+
+  POST /autonomous/save/{session_id}
+    Save research state + emotional state to disk.
+
+  GET /autonomous/saves
+    List saved research sessions.
+
+  POST /autonomous/load/{filename}
+    Load a saved research session (resume investigation).
+
+5.19 RAW MODE (Unfiltered Emotional Expression)
+----------
+  POST /raw/chat
+    Body: {message, session_id?}
+    Same emotional pipeline as /chat but with unfiltered behavior modifier.
+    Only works with local Ollama models (cloud providers block NSFW).
+    Uses generate_raw_behavior_modifier(): emotions expressed without social
+    filters — anger = insults/profanity, sadness = withdrawal, fear = panic.
+    Session is ephemeral: no saves, no export, no training data.
+
+  POST /raw/extreme?session_id=X&enabled=true
+    Toggles Extreme Mode on a raw session. When active:
+    - Bypasses: reappraisal, active regulation, immune system
+    - Amplifies: intensity x1.5, arousal x1.3 (floor 0.4), tension x1.4
+    - Reduces: warmth x0.6, openness x0.7
+    - Pushes valence further from zero (x1.4 negative, x1.3 positive)
+    Result: Raw frustration 0.64 → Extreme anger 1.00
+
+  POST /raw/reset?session_id=X
+    Destroys raw session completely.
+
+  RESTRICTIONS:
+    - Ollama-only (400 error if cloud provider active)
+    - Nothing persisted: raw_mode and extreme_mode flags not in save/load
+    - Frontend warning gate required before entering
+    - Session destroyed on tab change
+
+  UI ISOLATION (Raw Mode transforms the entire header):
+    - Mode tabs (Chat, Research, etc.) replaced by "RAW MODE" badge + EXIT button
+    - EXIT: destroys session, returns to Companion, reloads auto-load save
+    - Model Selector: only shows "Local" tab (Featured, Search, Cloud, HF hidden)
+    - Agent Setup: hidden
+    - Settings: only Engine (Advanced + Lite) and Voice. No Display, no Forecasting,
+      no Save/Export/New Session buttons
+    - Voice/Mic controls: remain available
+
+5.19 AVATAR/GENESIS INSTANCES PER MODE
+----------
+  Each mode has independent Avatar/Genesis visualizations:
+  - Companion/Research: Global sidebar (right panel)
+  - Sandbox: Embedded in results panel, local state, resets per simulation
+  - Arena: One Avatar per contestant reflecting individual emotional state
+  - Mirror: Right panel (240px), starts neutral, reacts per turn
+  - Raw: Right panel (240px), red-themed, resets on tab change
+  - Sandbox/Arena/Mirror/Raw do NOT affect global emotional state
+
+===============================================================================
+6. HOMEOSTASIS AND REGULATION
+===============================================================================
+
+6.1 NATURAL DECAY (passive)
+  - Each turn: valence/arousal decay 15% toward baseline
+  - If intensity < 0.1: emotion is reclassified to neutral
+  - Body state: energy drains gradually, tension decays
+
+6.2 BASELINE SHIFT
+  - Extreme events (intensity > 0.8) move the baseline
+  - Sensitization: more events = faster shift
+  - Max drift: 0.5. Recovery: after 5 turns without extreme
+
+6.3 ACTIVE REGULATION
+  - 4 strategies with different costs (ego depletion)
+  - Breakthrough when capacity < 0.15 (emotion amplified 15%)
+
+6.4 REAPPRAISAL
+  - Activates when intensity > 0.6, dominance > 0.35
+  - Transforms: fear->alertness, anxiety->contemplation, etc.
+
+6.5 MOOD SYSTEM
+  - Evolves based on emotional history (10 snapshots)
+  - Congruence bias: 15% bias on new emotions
+
+6.6 EMOTION DYNAMICS ODE
+  - dx/dt = -k*(x-att) + noise + perturbation + contagion
+  - Inertia by emotion: anger=0.8, surprise=0.1
+
+6.7 EMOTIONAL IMMUNE SYSTEM
+  - Detects trauma: intensity > 0.7 AND valence < -0.3
+  - Numbing (3+ turns), Dissociation (6+), Compartmentalization (8+)
+  - Automatic recovery: protection_strength -0.15/turn without trauma
+
+===============================================================================
+7. EMOTIONAL AUTHENTICITY METRICS
+===============================================================================
+
+  coherence (0-1):      state vs appraisal
+  continuity (0-1):     transition smoothness
+  proportionality (0-1): intensity vs stimulus magnitude
+  recovery (0-1):       natural decay post-peak
+  overall:              average of all 4
+
+===============================================================================
+8. CALIBRATION AND EXPORT
+===============================================================================
+
+  ./calibrate.sh [session_id] [personality]
+  ./calibrate_and_export.sh [base_model] [model_name] [personality]
+
+  Presets: balanced, sensitive, resilient, creative, empathic
+  45 scenarios, 19 emotions, ~67% accuracy with qwen3:4b.
+
+===============================================================================
+9. VOICE SYSTEM
+===============================================================================
+
+9.1 VOICE MODES
+  text_only:   No voice (default)
+  voice_out:   TTS — the agent speaks with emotion (V1)
+  full_voice:  TTS + ASR — the agent speaks and listens (V1+V2)
+
+9.2 TTS (Voice V1)
+  Two backends:
+
+  Kokoro TTS (primary):
+    - 82M params, ~350MB VRAM
+    - Multi-language: EN works out of the box
+    - Other languages (ES, DE, FR, IT, JA, KO, NL, PL, PT, HI) need espeak-ng
+    - Voice keys: af_heart, am_adam, ef_dora, em_alex, etc (Kokoro naming)
+    - Used for basic/standard emotions
+    - Audio: 24kHz, PCM16, mono WAV
+
+  Parler-TTS (optional, complex emotions):
+    - ~880M params, ~2.5GB VRAM
+    - EN only — text description control
+    - Used when emotion is complex or mixed AND language is EN
+    - Falls back to Kokoro if language is not EN
+
+  Voice Parameter Generator: emotional_state → voice params
+    - speed:           0.75 to 1.5 (arousal/intensity based)
+    - pitch_semitones:  -3.5 to +3.5 (scipy resample post-processing)
+    - volume:          50% to 140% (modulated by emotion)
+    - tremolo:         applied for fear/anxiety states
+    - Stage directions: "[speaking with warmth and a smile]" etc.
+
+  Backend selection: automatic
+    - Basic emotions → Kokoro
+    - Complex/mixed emotions + EN → Parler-TTS
+    - Complex/mixed emotions + non-EN → Kokoro fallback
+
+  Dynamic voice catalog: only shows languages that work on the system
+    (checks espeak-ng availability at startup)
+
+  Auto-play: audio plays automatically on response
+
+9.3 ASR (Voice V2)
+  - Whisper-small (OpenAI, openai-whisper package)
+  - Audio input: WAV or WebM (any sample rate, mono/stereo)
+  - Automatic resampling to 16kHz
+  - Automatic language detection
+  - Output: transcribed text + segments with timestamps
+  - ~0.5GB additional VRAM
+
+9.4 FRONTEND VOICE COMPONENTS
+  VoiceOrb:
+    - Web Audio API AnalyserNode, FFT reactive visualization
+    - Visual feedback of audio output in real-time
+
+  MicConfigPanel:
+    - Device selector for audio input
+    - Volume test (visual level meter)
+    - Stream sharing across components
+
+  MicInput:
+    - Instant recording via pre-acquired stream
+    - No delay on record start (stream already acquired)
+
+9.5 HARDWARE (GTX 1660 Super 6GB)
+  text_only:   qwen3:4b (2.5GB) = 2.5GB
+  voice_out:   + Kokoro (~350MB) = ~2.85GB
+  full_voice:  + Whisper (0.5GB) = ~3.35GB
+  voice_out with Parler: + Parler-TTS (~2.5GB) = ~5.0GB
+  Requirement: espeak-ng for non-English languages
+
+===============================================================================
+9A. AGENT SETUP PANEL
+===============================================================================
+
+  Panel for configuring agent personality, values, and identity.
+  Three tabs:
+
+  Personality tab:
+    - 5 presets: balanced, sensitive, resilient, creative, empathic
+    - Big Five sliders: openness, conscientiousness, extraversion,
+      agreeableness, neuroticism (each 0-1)
+
+  Values tab:
+    - 5 core value weight sliders: truth, compassion, fairness,
+      growth, creativity (each 0-1)
+
+  Identity tab:
+    - Agent name (text field)
+    - Background/description (text area)
+
+===============================================================================
+9B. PORTABLE EXPORT
+===============================================================================
+
+  Generates a ZIP with full portable engine:
+    - Complete engine source code
+    - Mini frontend (standalone HTML)
+    - Modelfile for Ollama
+    - BAT scripts for Windows
+    - If cloud model active: .env with cloud provider config (placeholder API key, URL, model)
+    - NOTE: API keys are NOT included for security — placeholder "YOUR_API_KEY_HERE" instead
+
+  install.bat:
+    - Checks Ollama installation
+    - Checks Python installation
+    - Creates virtual environment
+    - Installs dependencies
+
+  start.bat:
+    - Visual mode (frontend + backend)
+    - API service mode (backend only)
+
+  Size: ~97KB without model weights
+
+  NOTE: Export to Ollama (Modelfile) only works with LOCAL Ollama models.
+  If using a cloud provider, the button is disabled. Use Export Portable
+  instead — it includes the cloud provider config (without actual API keys)
+  for the recipient to configure.
+
+===============================================================================
+9C. ENRICHED OLLAMA EXPORT
+===============================================================================
+
+  The Ollama Modelfile export now includes all emotional systems:
+    - Personality profile (Big Five + temperament)
+    - Emotional schemas (learned patterns)
+    - Narrative identity (identity statements + growth events)
+    - User model (rapport, trust, communication style)
+    - Somatic markers (gut feelings)
+    - Emotional memories (key episodes)
+    - Regulation strategies and capacity
+    - Immune state (protection mode)
+    - Current state snapshot (valence, arousal, mood, body)
+    - Few-shot examples (emotional response patterns)
+
+===============================================================================
+10. TESTS
+===============================================================================
+
+668 tests organized by module:
+
+  CORE (181 tests):
+    test_generator.py    24  Emotion generation, stack, ranges, inertia
+    test_behavior.py      9  Behavior modifier, 19 emotions, effects
+    test_appraiser.py     5  Parsing, defaults, clamping
+    test_homeostasis.py  23  Decay, baseline shift, sensitization, recovery
+    test_memory.py       24  Cosine similarity, keywords, embeddings
+    test_mood.py         21  Classification, congruence bias, update
+    test_metrics.py      24  Coherence, continuity, proportionality, recovery
+    test_research.py     16  Research endpoints, internals exposed
+    test_calibration.py  22  Compute profile, apply, endpoints
+
+  ADVANCED (115 tests):
+    test_needs.py        15  Fluctuation, amplification, keywords
+    test_regulation.py   14  4 strategies, ego depletion, breakthroughs
+    test_dynamics.py     14  ODE step, inertia, noise, fluctuation
+    test_social.py       14  Asymmetric rapport, intent, style, modulation
+    test_reappraisal.py  11  3 strategies, transitions, triggers
+    test_schemas.py      14  Formation, reinforcement, priming, maladaptive
+    test_temporal.py     10  Rumination, savoring, anticipation
+    test_meta_emotion.py  9  Conflict, curiosity, satisfaction, discomfort
+    test_personality.py  14  Big Five, derived properties, edge cases
+
+  WAVE 1 — DEPTH (114 tests):
+    test_contagion.py    40  Lexicon, shadow state, perturbation, susceptibility
+    test_somatic.py      33  Categorize, register, evaluate, bias, gut feeling
+    test_creativity.py   41  8 modes, level, temperature, Yerkes-Dodson
+
+  WAVE 2 — IDENTITY (155 tests):
+    test_immune.py       42  3 modes, detection, recovery, compartmentalization
+    test_narrative.py    61  Statements, coherence, crisis, growth
+    test_forecasting.py  52  Estimation, impact, accuracy tracking, calibration
+
+  VOICE (79 tests):
+    test_voice.py        46  Params, stage directions, cfg, temperature, presets
+    test_asr.py          33  Decode WAV/PCM, transcribe, singleton, states
+
+Run all: python -m pytest
+Run one: python -m pytest tests/test_asr.py -v
+
+===============================================================================
+11. IMPLEMENTATION PHASES
+===============================================================================
+
+  PHASE 1 (MVP) - COMPLETE
+  PHASE 2 (Core) - COMPLETE
+  PHASE 3 (Advanced) - COMPLETE
+  PHASE 4 (Advanced+) - COMPLETE — 10 systems, 296 tests
+
+  WAVE 1 (Depth) - COMPLETE
+    Emotion Contagion, Somatic Markers, Emotional Creativity
+
+  WAVE 2 (Identity) - COMPLETE
+    Emotional Immune System, Narrative Self, Emotional Forecasting
+
+  VOICE V1 (TTS) - COMPLETE
+    Kokoro + Parler-TTS, Voice Parameter Generator
+
+  VOICE V2 (ASR) - COMPLETE
+    Whisper-small, MediaRecorder, automatic transcription
+
+  PENDING:
+    Voice V3 (SER) — Speech Emotion Recognition (optional)
+    Voice V4 — Fluid WebSocket conversation
+    Counterfactual Emotion, Collective State, Transfer Learning
+
+===============================================================================
+12. ETHICAL CONSIDERATIONS
+===============================================================================
+
+  1. The system NEVER claims to "feel" in a conscious sense
+  2. Full transparency: the user can see all internals
+  3. No emotional manipulation of the user
+  4. User distress takes PRIORITY over agent's emotional authenticity
+  5. Emotions are functional, not subjective
+  6. SER (vocal emotion detection) is always OPT-IN, never forced
+  7. The user can deactivate any advanced system
+
+===============================================================================

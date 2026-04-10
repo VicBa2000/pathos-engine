@@ -1,0 +1,27 @@
+/* ===== Journey Timeline ===== */
+.journey-timeline {
+  background: #0e0e20;
+  border-top: 1px solid #1e1e38;
+  padding: 8px 16px;
+}
+
+.journey-timeline h3 {
+  margin: 0 0 4px;
+  font-size: 10px;
+  color: #3a3a5a;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-weight: 700;
+}
+
+.journey-timeline svg {
+  width: 100%;
+  display: block;
+}
+
+.journey-empty {
+  color: #2a2a4a;
+  font-size: 11px;
+  text-align: center;
+  padding: 12px 0;
+}

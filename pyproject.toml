@@ -1,0 +1,48 @@
+[project]
+name = "pathos"
+version = "0.1.0"
+description = "Functional emotional architecture for LLMs"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.10.0",
+    "numpy>=2.2.0",
+    "httpx>=0.28.0",
+    "anthropic>=0.52.0",
+    "pydantic-settings>=2.13.1",
+    "python-multipart>=0.0.9",
+    "langdetect>=1.0.9",
+    "cryptography>=41.0.0",
+    "ddgs>=9.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pathos"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "httpx>=0.28.0",
+]
+voice = [
+    "kokoro>=0.9.0",
+    "soundfile>=0.13.0",
+    "torch>=2.0.0",
+    "scipy>=1.11.0",
+    "openai-whisper>=20231117",
+]
+voice-parler = [
+    "parler-tts>=1.0.0",
+    "transformers>=4.35.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

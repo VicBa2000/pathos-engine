@@ -1,0 +1,200 @@
+/* ===== Mic Config Panel — mirrors VoiceConfigPanel style ===== */
+.mic-config {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 300px;
+  background: #14142c;
+  border: 1px solid #2a2a4a;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  animation: mic-config-in 0.15s ease-out;
+  overflow: hidden;
+}
+
+@keyframes mic-config-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mic-config__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+}
+
+.mic-config__title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #55aa88;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.mic-config__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  color: #5558;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.mic-config__close:hover {
+  color: #aab;
+  background: #2a2a4a;
+}
+
+.mic-config__section {
+  padding: 8px 14px;
+}
+
+.mic-config__label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: #5558;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+/* Device list */
+.mic-config__device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mic-config__device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #8888aa;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.mic-config__device:hover {
+  background: #1a1a3a;
+  color: #ccd;
+}
+
+.mic-config__device--active {
+  background: #1a2a2a;
+  border-color: #2a6a5a;
+  color: #8dc;
+}
+
+.mic-config__device-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Volume meter */
+.mic-config__meter-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.mic-config__meter {
+  flex: 1;
+  height: 8px;
+  background: #1a1a36;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.mic-config__meter-fill {
+  height: 100%;
+  background: #4a9;
+  border-radius: 4px;
+  transition: width 0.05s ease-out;
+}
+
+.mic-config__meter-fill--hot {
+  background: #e84;
+}
+
+.mic-config__meter-value {
+  font-size: 11px;
+  color: #666;
+  width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Test button */
+.mic-config__test-btn {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #2a6a5a;
+  border-radius: 8px;
+  background: #1a2a2a;
+  color: #4a9;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.mic-config__test-btn:hover {
+  background: #2a3a3a;
+  border-color: #4a9a7a;
+}
+
+.mic-config__test-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.mic-config__test-btn--stop {
+  border-color: #6a3a3a;
+  background: #2a1a1a;
+  color: #e66;
+}
+
+.mic-config__test-btn--stop:hover {
+  background: #3a2a2a;
+}
+
+/* Status messages */
+.mic-config__info {
+  font-size: 11px;
+  color: #4a4a6a;
+  line-height: 1.4;
+  padding-bottom: 4px;
+}
+
+.mic-config__error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #e66;
+  padding-bottom: 4px;
+}
+
+.mic-config__ok {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #4a9;
+  padding-bottom: 4px;
+}

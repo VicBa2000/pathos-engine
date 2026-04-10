@@ -1,0 +1,150 @@
+.research-panel {
+  padding: 16px;
+  height: 100%;
+  overflow-y: auto;
+  background: #1a1a2e;
+}
+
+.research-panel h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #8888aa;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.research-empty {
+  color: #555577;
+  text-align: center;
+  margin-top: 40%;
+  font-style: italic;
+}
+
+.research-section {
+  margin-bottom: 14px;
+  padding: 10px;
+  background: #16162a;
+  border-radius: 8px;
+  border: 1px solid #2a2a4a;
+}
+
+.research-section h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: #6666aa;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.research-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.research-row__label {
+  color: #8888aa;
+  min-width: 80px;
+}
+
+.research-row__value {
+  color: #ccd;
+  word-break: break-all;
+}
+
+.research-prompt {
+  font-size: 10px;
+  color: #aab;
+  background: #111122;
+  padding: 8px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Metric bars */
+.research-metric {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.research-metric__label {
+  width: 100px;
+  font-size: 11px;
+  color: #8888aa;
+}
+
+.research-metric__label--highlight {
+  color: #dde;
+  font-weight: 700;
+}
+
+.research-metric__track {
+  flex: 1;
+  height: 8px;
+  background: #111122;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.research-metric__fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.research-metric__value {
+  width: 36px;
+  text-align: right;
+  font-size: 11px;
+  color: #888;
+  font-family: monospace;
+}
+
+/* Status indicators */
+.research-status {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: monospace;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-right: 6px;
+}
+
+.research-status--on {
+  color: #2ecc71;
+  background: #2ecc7115;
+  border: 1px solid #2ecc7140;
+}
+
+.research-status--off {
+  color: #555577;
+  background: transparent;
+}
+
+/* Breakthrough alert */
+.research-breakthrough {
+  text-align: center;
+  padding: 4px 8px;
+  margin-top: 4px;
+  background: #e74c3c20;
+  border: 1px solid #e74c3c50;
+  border-radius: 4px;
+  color: #e74c3c;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  animation: pulse-breakthrough 1.5s infinite;
+}
+
+@keyframes pulse-breakthrough {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
