@@ -502,7 +502,7 @@ We welcome contributions of all sizes — from typo fixes to new emotional syste
 
 You are free to use, modify, and distribute this software. If you deploy it as a service (SaaS), you must release your modifications under AGPL-3.0.
 
-**Commercial licensing** is available for organizations that cannot comply with AGPL terms. Contact: [to be added]
+**Commercial licensing** is available for organizations that cannot comply with AGPL terms. Contact: victorbarrantes2000@gmail.com
 
 See [LICENSE](LICENSE) for the full text.
 
