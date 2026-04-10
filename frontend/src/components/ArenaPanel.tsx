@@ -11,6 +11,7 @@ interface Props {
 }
 
 const BIG_FIVE_SHORT = { openness: "O", conscientiousness: "C", extraversion: "E", agreeableness: "A", neuroticism: "N" } as const;
+const BIG_FIVE_KEYS = Object.keys(BIG_FIVE_SHORT) as (keyof typeof BIG_FIVE_SHORT)[];
 
 // 10 polarized presets — each is an EXTREME version of what it represents
 // Values are pushed to the edges (0.05-0.95) to maximize divergence in arena results
