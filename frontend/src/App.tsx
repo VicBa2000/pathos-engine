@@ -97,6 +97,11 @@ export default function App() {
   const [showPipeline, setShowPipeline] = useState(false);
   const [showGenesis, setShowGenesis] = useState(false);
   const [showAvatar, setShowAvatar] = useState(false);
+
+  // Panel limit — prevent too many panels from overflowing screen
+  const MAX_DISPLAY_PANELS = 3;
+  const activePanelCount = [showEmotionSidebar, showNetwork, showPipeline, showGenesis, showAvatar].filter(Boolean).length;
+  const panelLimitReached = activePanelCount >= MAX_DISPLAY_PANELS;
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [pipelineTrace, setPipelineTrace] = useState<PipelineTrace | null>(null);
@@ -325,7 +330,7 @@ export default function App() {
         currentModel={currentModel}
         onModelChanged={(provider, model) => { setCurrentProvider(provider); setCurrentModel(model); }}
         showNetwork={showNetwork}
-        onToggleNetwork={() => setShowNetwork(p => !p)}
+        onToggleNetwork={() => { if (showNetwork || !panelLimitReached) setShowNetwork(p => !p); }}
         showForecasting={forecastingEnabled}
         onToggleForecasting={() => {
           const newVal = !forecastingEnabled;
@@ -393,13 +398,14 @@ export default function App() {
           }
         }}
         showEmotionSidebar={showEmotionSidebar}
-        onToggleEmotionSidebar={() => setShowEmotionSidebar(p => !p)}
+        onToggleEmotionSidebar={() => { if (showEmotionSidebar || !panelLimitReached) setShowEmotionSidebar(p => !p); }}
         showPipeline={showPipeline}
-        onTogglePipeline={() => setShowPipeline(p => !p)}
+        onTogglePipeline={() => { if (showPipeline || !panelLimitReached) setShowPipeline(p => !p); }}
         showGenesis={showGenesis}
-        onToggleGenesis={() => setShowGenesis(p => !p)}
+        onToggleGenesis={() => { if (showGenesis || !panelLimitReached) setShowGenesis(p => !p); }}
         showAvatar={showAvatar}
-        onToggleAvatar={() => setShowAvatar(p => !p)}
+        onToggleAvatar={() => { if (showAvatar || !panelLimitReached) setShowAvatar(p => !p); }}
+        panelLimitReached={panelLimitReached}
         sessionId={sessionId}
         onNewSession={handleNewSession}
         onSave={handleSave}
@@ -433,7 +439,7 @@ export default function App() {
           ) : isMirrorMode ? (
             <ErrorBoundary fallbackLabel="Mirror Test"><MirrorTest sessionId={sessionId} connected={connected} /></ErrorBoundary>
           ) : isRawMode ? (
-            <ErrorBoundary fallbackLabel="Raw Mode"><RawChatPanel connected={connected} currentProvider={currentProvider} voiceEnabled={voiceEnabled} /></ErrorBoundary>
+            <ErrorBoundary fallbackLabel="Raw Mode"><RawChatPanel connected={connected} currentProvider={currentProvider} voiceEnabled={voiceEnabled} voiceInputEnabled={micEnabled && micReady} micStream={micStream} /></ErrorBoundary>
           ) : mode === "autonomous" ? (
             <ErrorBoundary fallbackLabel="Autonomous Research"><AutonomousResearchPanel
               connected={connected}

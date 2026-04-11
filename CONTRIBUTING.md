@@ -49,12 +49,18 @@ Understanding the architecture helps you contribute effectively.
 ### Backend (`src/pathos/`)
 
 ```
-main.py              The FastAPI app. 3 pipeline variants (chat, research, sandbox).
+main.py              The FastAPI app. Pipeline variants (chat, research, sandbox, raw).
                      This is where pipeline steps are orchestrated.
+api_routes.py        Emotion API as a Service — standalone REST endpoints (/api/v1/).
 config.py            Pydantic settings — all configurable via env vars.
 engine/              Emotional processing modules. Each system = 1 file.
+  emotion_processor.py   Standalone pipeline (runs without LLM).
+  external_signals.py    Real-world signal fusion (heart rate, weather, etc.).
 models/              Pydantic data models (immutable state objects).
-llm/                 LLM provider abstraction (Ollama, Claude).
+  coupling.py            Cross-dimensional ODE coupling matrix.
+  emotion_api.py         Emotion API request/response schemas.
+  external_signals.py    Signal config + source definitions.
+llm/                 LLM provider abstraction (Ollama, Claude, OpenAI-compat).
 voice/               TTS + ASR (optional, not needed for core development).
 state/manager.py     Session state management (in-memory).
 ```
@@ -264,7 +270,7 @@ The CLA is required to maintain the dual-licensing model that keeps the project 
 
 **Testing:**
 - Integration tests for full pipeline
-- Endpoint tests for all 66 API routes
+- Endpoint tests for all 76 API routes
 - Performance benchmarks
 - Cross-model testing (different Ollama models)
 

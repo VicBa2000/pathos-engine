@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from pathos.engine.dynamics import EmotionDynamics
+from pathos.models.coupling import CouplingMatrix, coupling_from_personality
 from pathos.engine.narrative import NarrativeTracker
 from pathos.engine.emotional_schemas import SchemaStore, EmotionalSchema
 from pathos.engine.memory import EmotionalMemoryStore
@@ -21,6 +22,7 @@ from pathos.models.calibration import CalibrationProfile, CalibrationResult
 from pathos.models.contagion import ShadowState, default_shadow_state
 from pathos.models.emotion import EmotionalState, PrimaryEmotion, neutral_state
 from pathos.models.forecasting import ForecastState, default_forecast_state
+from pathos.models.external_signals import ExternalSignalsConfig, default_signals_config
 from pathos.models.voice import VoiceConfig, default_voice_config
 from pathos.models.immune import ImmuneState, default_immune_state
 from pathos.models.memory import EmotionalMemory
@@ -66,6 +68,7 @@ class SessionState:
         self.narrative: NarrativeSelf = default_narrative_self()
         self.forecast: ForecastState = default_forecast_state()
         self.voice_config: VoiceConfig = default_voice_config()
+        self.signals_config: ExternalSignalsConfig = default_signals_config()
         self.last_audio: bytes | None = None  # Last TTS audio (WAV bytes)
         self.audio_history: dict[int, bytes] = {}  # turn_number -> WAV bytes
         self.lite_mode: bool = False  # Lite mode: keyword appraisal, no embeddings, 1 LLM call
@@ -77,11 +80,24 @@ class SessionState:
         self.narrative_tracker: "NarrativeTracker" = self._create_narrative_tracker()
 
         # Dynamics (configured from personality)
+        self.coupling: CouplingMatrix = self._create_coupling()
         self.dynamics: EmotionDynamics = self._create_dynamics()
 
     @staticmethod
     def _create_narrative_tracker() -> NarrativeTracker:
         return NarrativeTracker()
+
+    def _create_coupling(self) -> CouplingMatrix:
+        """Crea CouplingMatrix desde la personalidad actual."""
+        p = self.personality
+        return coupling_from_personality(
+            openness=p.openness,
+            conscientiousness=p.conscientiousness,
+            extraversion=p.extraversion,
+            agreeableness=p.agreeableness,
+            neuroticism=p.neuroticism,
+            emotional_reactivity=p.emotional_reactivity,
+        )
 
     def _create_dynamics(self) -> EmotionDynamics:
         """Crea EmotionDynamics configurada desde la personalidad."""
@@ -95,6 +111,7 @@ class SessionState:
     def update_personality(self, personality: PersonalityProfile) -> None:
         """Actualiza la personalidad y reconfigura los sistemas dependientes."""
         self.personality = personality
+        self.coupling = self._create_coupling()
         self.dynamics = self._create_dynamics()
         self.regulator.regulation_capacity = personality.regulation_capacity_base
 
@@ -140,6 +157,8 @@ class SessionState:
                 "pattern_counts": {f"{k[0]}|{k[1]}": v for k, v in self.narrative_tracker._pattern_counts.items()},
                 "pattern_intensities": {f"{k[0]}|{k[1]}": v for k, v in self.narrative_tracker._pattern_intensities.items()},
             },
+            # Coupling
+            "coupling": self.coupling.model_dump(),
             # Settings
             "lite_mode": self.lite_mode,
             "advanced_mode": self.advanced_mode,
@@ -165,7 +184,10 @@ class SessionState:
         # Advanced Pydantic models
         if "personality" in data:
             session.personality = PersonalityProfile(**data["personality"])
+            session.coupling = session._create_coupling()
             session.dynamics = session._create_dynamics()
+        if "coupling" in data:
+            session.coupling = CouplingMatrix(**data["coupling"])
         if "needs" in data:
             session.needs = ComputationalNeeds(**data["needs"])
         if "user_model" in data:
