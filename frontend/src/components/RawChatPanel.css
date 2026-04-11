@@ -236,6 +236,17 @@
   font-style: italic;
 }
 
+.raw-chat__bubble--transcribing {
+  color: #6a9aba;
+  font-style: italic;
+  animation: rawTranscribePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes rawTranscribePulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 .raw-chat__voice-wrap {
   margin-top: 4px;
 }

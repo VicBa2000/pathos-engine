@@ -20,7 +20,7 @@ dim()   { echo -e "${DIM}$1${NC}"; }
 
 echo ""
 echo -e "${BOLD}${CYAN}  ╔═══════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${CYAN}  ║         PATHOS ENGINE v2 — Setup          ║${NC}"
+echo -e "${BOLD}${CYAN}  ║         PATHOS ENGINE v3 — Setup          ║${NC}"
 echo -e "${BOLD}${CYAN}  ║   Emotional Architecture for LLMs         ║${NC}"
 echo -e "${BOLD}${CYAN}  ╚═══════════════════════════════════════════╝${NC}"
 echo ""
@@ -82,7 +82,24 @@ fi
 echo ""
 echo -e "${CYAN}--- Backend dependencies ---${NC}"
 
-if [ ! -d ".venv" ]; then
+VENV_OK=false
+if [ -d ".venv" ]; then
+  # Venv exists — verify its Python is functional (breaks on disk/path changes)
+  VENV_PY=""
+  if [ -f ".venv/Scripts/python.exe" ]; then
+    VENV_PY=".venv/Scripts/python"
+  elif [ -f ".venv/bin/python" ]; then
+    VENV_PY=".venv/bin/python"
+  fi
+  if [ -n "$VENV_PY" ] && $VENV_PY --version >/dev/null 2>&1; then
+    VENV_OK=true
+  else
+    warn "Python venv found but broken (disk/path change?). Recreating..."
+    rm -rf .venv
+  fi
+fi
+
+if ! $VENV_OK; then
   warn "Python venv not found. Creating..."
   if $HAS_UV; then
     uv venv
@@ -361,9 +378,38 @@ if [ ! -d "node_modules" ]; then
   warn "Frontend node_modules not found. Installing..."
   npm install 2>&1 | tail -3
 else
-  info "Frontend node_modules found"
+  # Always sync to catch new dependencies (e.g. @vladmandic/face-api)
+  dim "  Syncing frontend packages..."
+  npm install 2>&1 | tail -3
 fi
 info "Frontend dependencies ready"
+
+# Copy face-api.js models to public/ (needed for facial AU detection)
+FACE_API_MODELS="$ROOT/frontend/node_modules/@vladmandic/face-api/model"
+FACE_API_PUBLIC="$ROOT/frontend/public/models"
+if [ -d "$FACE_API_MODELS" ]; then
+  mkdir -p "$FACE_API_PUBLIC"
+  for f in tiny_face_detector_model.bin tiny_face_detector_model-weights_manifest.json \
+           face_expression_model.bin face_expression_model-weights_manifest.json; do
+    if [ -f "$FACE_API_MODELS/$f" ] && [ ! -f "$FACE_API_PUBLIC/$f" ]; then
+      cp "$FACE_API_MODELS/$f" "$FACE_API_PUBLIC/"
+    fi
+  done
+  info "Face-api.js models in public/models/"
+fi
+
+# Copy KTX2 basis transcoder to public/ (needed for 3D avatar textures)
+BASIS_SRC="$ROOT/frontend/node_modules/three/examples/jsm/libs/basis"
+BASIS_PUBLIC="$ROOT/frontend/public/basis"
+if [ -d "$BASIS_SRC" ]; then
+  mkdir -p "$BASIS_PUBLIC"
+  for f in basis_transcoder.js basis_transcoder.wasm; do
+    if [ -f "$BASIS_SRC/$f" ] && [ ! -f "$BASIS_PUBLIC/$f" ]; then
+      cp "$BASIS_SRC/$f" "$BASIS_PUBLIC/"
+    fi
+  done
+  info "KTX2 basis transcoder in public/basis/"
+fi
 
 cd "$ROOT"
 

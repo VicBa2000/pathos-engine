@@ -314,6 +314,17 @@ class PersonalityDetails(BaseModel):
     regulation_capacity_base: float
 
 
+class CouplingDetails(BaseModel):
+    """Detalles del acoplamiento dimensional (cross-dimensional ODE interaction)."""
+
+    active: bool = False
+    matrix: list[list[float]] = []  # 4x4 [V,A,D,C] x [V,A,D,C]
+    contribution_v: float = 0.0  # Coupling contribution to valence this turn
+    contribution_a: float = 0.0  # Coupling contribution to arousal this turn
+    contribution_d: float = 0.0  # Coupling contribution to dominance this turn
+    contribution_c: float = 0.0  # Coupling contribution to certainty this turn
+
+
 class ResearchChatResponse(BaseModel):
     """Response del endpoint /research/chat - expone todos los internos."""
 
@@ -343,6 +354,7 @@ class ResearchChatResponse(BaseModel):
     immune: ImmuneDetails
     narrative: NarrativeDetails
     forecasting: ForecastingDetails
+    coupling: CouplingDetails
     voice: VoiceDetails
 
     # Results
@@ -418,6 +430,7 @@ class SandboxResult(BaseModel):
     immune: ImmuneDetails
     narrative: NarrativeDetails
     forecasting: ForecastingDetails
+    coupling: CouplingDetails = CouplingDetails()
 
     # Analysis
     emergent_emotions: list[str]

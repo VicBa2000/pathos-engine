@@ -19,7 +19,7 @@ export function ResearchPanel({ data }: Props) {
 
   const { appraisal, homeostasis, memory_amplification, mood_congruence, emotion_generation,
     needs, social, regulation, reappraisal, temporal, meta_emotion, schemas, personality,
-    contagion, somatic, creativity, immune, narrative, forecasting, voice, authenticity_metrics, emotional_state, emergent_emotions } = data;
+    contagion, somatic, creativity, immune, narrative, forecasting, coupling, voice, authenticity_metrics, emotional_state, emergent_emotions } = data;
 
   return (
     <div className="research-panel">
@@ -188,6 +188,21 @@ export function ResearchPanel({ data }: Props) {
         )}
       </Section>
 
+      {/* Dimensional Coupling */}
+      <Section title={`Dimensional Coupling ${coupling?.active ? "ON" : "OFF"}`}>
+        {coupling?.active ? (
+          <>
+            <CouplingGrid matrix={coupling.matrix} />
+            <Row label="Contrib V" value={`${coupling.contribution_v >= 0 ? "+" : ""}${coupling.contribution_v.toFixed(4)}`} />
+            <Row label="Contrib A" value={`${coupling.contribution_a >= 0 ? "+" : ""}${coupling.contribution_a.toFixed(4)}`} />
+            <Row label="Contrib D" value={`${coupling.contribution_d >= 0 ? "+" : ""}${coupling.contribution_d.toFixed(4)}`} />
+            <Row label="Contrib C" value={`${coupling.contribution_c >= 0 ? "+" : ""}${coupling.contribution_c.toFixed(4)}`} />
+          </>
+        ) : (
+          <Row label="Status" value="Inactive (advanced mode off or zero matrix)" />
+        )}
+      </Section>
+
       {/* Voice (optional) */}
       <Section title={`Voice ${voice.mode === "text_only" ? "OFF" : "ON"}`}>
         {voice.mode !== "text_only" ? (
@@ -353,6 +368,46 @@ function MetricBar({ label, value, highlight }: { label: string; value: number; 
         <div className="research-metric__fill" style={{ width: `${value * 100}%`, backgroundColor: color }} />
       </div>
       <span className="research-metric__value">{(value * 100).toFixed(0)}%</span>
+    </div>
+  );
+}
+
+const COUPLING_DIMS = ["V", "A", "D", "C"];
+
+function CouplingGrid({ matrix }: { matrix: number[][] }) {
+  if (!matrix || matrix.length !== 4) return null;
+
+  const cellColor = (val: number): string => {
+    if (val === 0) return "transparent";
+    const abs = Math.min(Math.abs(val) * 10, 1); // Scale for visibility
+    return val > 0
+      ? `rgba(46, 204, 113, ${abs})`   // green for excitatory
+      : `rgba(231, 76, 60, ${abs})`;    // red for inhibitory
+  };
+
+  return (
+    <div className="coupling-grid">
+      <div className="coupling-grid__row coupling-grid__header">
+        <span className="coupling-grid__cell coupling-grid__corner" />
+        {COUPLING_DIMS.map(d => (
+          <span key={d} className="coupling-grid__cell coupling-grid__head">{d}</span>
+        ))}
+      </div>
+      {matrix.map((row, i) => (
+        <div key={i} className="coupling-grid__row">
+          <span className="coupling-grid__cell coupling-grid__head">{COUPLING_DIMS[i]}</span>
+          {row.map((val, j) => (
+            <span
+              key={j}
+              className="coupling-grid__cell"
+              style={{ backgroundColor: cellColor(val) }}
+              title={`${COUPLING_DIMS[j]}\u2192${COUPLING_DIMS[i]}: ${val.toFixed(4)}`}
+            >
+              {i === j ? "\u00B7" : val === 0 ? "0" : (val > 0 ? "+" : "") + val.toFixed(3)}
+            </span>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 ===============================================================================
-                   PATHOS ENGINE v2 - USAGE INSTRUCTIONS
+                   PATHOS ENGINE v3 - USAGE INSTRUCTIONS
 ===============================================================================
 
 ===============================================================================
@@ -62,6 +62,7 @@
     - Verifies that Python and Node are installed
     - Installs uv if available (uses pip as fallback)
     - Creates the Python virtual environment if it doesn't exist
+      (auto-detects and recreates broken venvs from disk/path changes)
     - Installs backend dependencies (pip + ensurepip if missing)
     - Installs frontend dependencies (npm install)
     - Downloads Ollama models if missing
@@ -186,6 +187,7 @@
     [Mic icon]           Mic Config Panel (device selector, level test)
     [Model]              Model Manager Panel (local, featured, search, cloud, HuggingFace)
     [Voice icon]         Toggle agent voice (TTS with Kokoro)
+    [Signals icon]       External Signals Panel (webcam, keyboard, weather, time)
     [Gear icon]          Settings Panel with the following toggles:
 
   SETTINGS PANEL (click on the gear icon):
@@ -194,7 +196,7 @@
       [Network Graph]    Toggle neural map of emotional transitions
       [Pipeline Viewer]  Toggle step-by-step emotional pipeline viewer
       [Emotion Genesis]  Toggle living organism (Canvas 2D, particles + plasma)
-      [Emotion Avatar]   Toggle procedural animated face (emotional expressions)
+      [Emotion Avatar]   Toggle animated face (dual mode: Painterly 2D / Realistic 3D)
 
     Engine:
       [Advanced]         Toggle advanced emotional systems (ON by default)
@@ -284,6 +286,7 @@
     16. Emotional Schemas — formed schemas, priming
 
     + Optional sections (when active):
+    - Dimensional Coupling — 4x4 coupling matrix heatmap, V/A/D/C contributions
     - Contagion — shadow state, signal strength, perturbation
     - Somatic Markers — markers count, bias, gut feeling
     - Emotional Creativity — thinking mode, level, temperature
@@ -459,6 +462,23 @@
 
   Avatar and Genesis are integrated in the right panel (red theme).
 
+  4.10 EMOTION AVATAR
+  ------------------------------------
+  The avatar has two rendering modes, toggled via buttons on hover:
+
+    Painterly (Canvas 2D): semi-realistic digital portrait with detailed
+    facial features, ambient occlusion, emotional rim light, and extreme
+    expressions (tears, sweat, lip tremor, clenched teeth).
+
+    Realistic (Three.js 3D): WebGL face using FaceCap.glb model with
+    52 ARKit blend shapes, PBR materials, 3-point emotional lighting.
+
+  Both share: 19 facial parameters derived from emotional state,
+  smooth interpolation, blink/gestures/microexpressions/lip sync.
+
+  Max 3 display panels active simultaneously (Avatar, Genesis, Network,
+  Pipeline, Emotion Panel). Disable one to enable another.
+
 ===============================================================================
 5. VOICE
 ===============================================================================
@@ -558,10 +578,10 @@
 7. THE 22 EMOTIONAL SYSTEMS
 ===============================================================================
 
-  NOTE: The 22 emotional systems include 6 basic ones (homeostasis,
+  NOTE: The 23 emotional systems include 6 basic ones (homeostasis,
   appraisal, memory, mood, calibration, metrics) that are always active,
-  and 16 advanced ones (1-16 below) that can be disabled with the
-  "Advanced" toggle in Settings > Engine.
+  and 17 advanced ones (1-16 below + Coupled Dynamics) that can be
+  disabled with the "Advanced" toggle in Settings > Engine.
 
   CORE (Phase 4):
   1.  Emotional Stack — 19 simultaneous emotions + emergent
@@ -750,7 +770,7 @@
 11. RUNNING TESTS
 ===============================================================================
 
-  # All tests (668)
+  # All tests (889)
   python -m pytest
 
   # With detail
@@ -794,3 +814,132 @@
 
   PROBLEM: "Form data requires python-multipart"
   SOLUTION: pip install python-multipart
+
+
+===============================================================================
+EMOTION API AS A SERVICE (v3)
+===============================================================================
+
+  The Emotion API lets any application use Pathos as its emotional processing
+  layer — no LLM, no chat interface required. Keyword-based appraisal runs
+  in <1ms per stimulus.
+
+  Base URL: http://localhost:8000/api/v1
+
+  QUICK START — curl examples:
+
+    # 1. Health check
+    curl http://localhost:8000/api/v1/health
+
+    # 2. Process a single stimulus
+    curl -X POST http://localhost:8000/api/v1/emotion/process \
+      -H "Content-Type: application/json" \
+      -d '{"stimulus": "I just got promoted at work!"}'
+
+    # 3. Process with custom personality
+    curl -X POST http://localhost:8000/api/v1/emotion/process \
+      -H "Content-Type: application/json" \
+      -d '{
+        "stimulus": "The deadline was moved up",
+        "session_id": "my-app",
+        "personality": {"neuroticism": 0.8, "conscientiousness": 0.9}
+      }'
+
+    # 4. Batch processing (up to 50 stimuli)
+    curl -X POST http://localhost:8000/api/v1/emotion/batch \
+      -H "Content-Type: application/json" \
+      -d '{
+        "stimuli": ["I feel great", "This is terrible", "I am calm now"],
+        "session_id": "batch-demo"
+      }'
+
+    # 5. Get current state
+    curl http://localhost:8000/api/v1/emotion/state?session_id=api-my-app
+
+    # 6. Configure personality
+    curl -X POST http://localhost:8000/api/v1/emotion/configure \
+      -H "Content-Type: application/json" \
+      -d '{"session_id": "my-app", "personality": {"openness": 0.9}}'
+
+    # 7. With external signals (e.g., facial AU + weather)
+    curl -X POST http://localhost:8000/api/v1/emotion/process \
+      -H "Content-Type: application/json" \
+      -d '{
+        "stimulus": "entering the meeting room",
+        "external_signals": [
+          {"source": "facial_au", "valence_hint": -0.3, "arousal_hint": 0.6, "confidence": 0.8},
+          {"source": "weather", "valence_hint": 0.3, "confidence": 0.5}
+        ]
+      }'
+
+    # 8. Full detail mode (pipeline trace + coupling)
+    curl -X POST http://localhost:8000/api/v1/emotion/process \
+      -H "Content-Type: application/json" \
+      -d '{
+        "stimulus": "unexpected news",
+        "config": {
+          "include_pipeline_trace": true,
+          "include_coupling": true,
+          "include_behavior_prompt": true
+        }
+      }'
+
+    # 9. List personality presets
+    curl http://localhost:8000/api/v1/emotion/presets
+
+    # 10. Reset a session
+    curl -X POST http://localhost:8000/api/v1/emotion/reset?session_id=api-my-app
+
+  QUICK START — Python example:
+
+    import requests
+
+    API = "http://localhost:8000/api/v1"
+
+    # Process stimulus
+    r = requests.post(f"{API}/emotion/process", json={
+        "stimulus": "I just received wonderful news!",
+        "session_id": "python-demo",
+    })
+    data = r.json()
+    print(f"Emotion: {data['primary_emotion']} ({data['intensity']:.2f})")
+    print(f"Valence: {data['valence']:.3f}, Arousal: {data['arousal']:.3f}")
+    print(f"Mood: {data['mood_label']} ({data['mood_trend']})")
+
+  QUICK START — JavaScript example:
+
+    const API = "http://localhost:8000/api/v1";
+
+    const res = await fetch(`${API}/emotion/process`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        stimulus: "The user seems frustrated",
+        session_id: "js-demo",
+      }),
+    });
+    const data = await res.json();
+    console.log(`${data.primary_emotion}: v=${data.valence} a=${data.arousal}`);
+
+  EXTERNAL SIGNALS PANEL (Frontend):
+  - Click the pulse/signal icon in the header bar to open the panel
+  - Master toggle enables/disables all signal processing
+  - 4 implemented sources, each with its own toggle:
+    * Facial AU: webcam-based expression detection (Start/Stop opens camera,
+      shows live preview + expression bars, 5-second buffer with recency weighting)
+    * Keyboard Dynamics: typing pattern analysis
+    * Time of Day: circadian context
+    * Weather: ambient weather conditions
+  - Configure valence, arousal, and confidence per source with sliders
+  - "Test" button previews the signal's effect without modifying state
+  - Only ACTIVE sources affect the emotional pipeline
+  - Signals are grouped by category: physiological, behavioral, environmental
+  - Agent perceives active signals naturally ("you seem a bit tense...")
+
+  NOTES:
+  - Session IDs are auto-prefixed with "api-" to isolate from chat sessions
+  - No LLM needed — keyword appraisal runs locally in <1ms
+  - State persists across requests for the same session_id
+  - OpenAPI docs auto-generated at http://localhost:8000/docs
+  - External signals are ALWAYS opt-in (user must activate them explicitly)
+  - This is functional emotion, NOT conscious experience

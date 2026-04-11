@@ -1,5 +1,5 @@
 ===============================================================================
-                        PATHOS ENGINE v2 - COMPLETE MANUAL
+                        PATHOS ENGINE v3 - COMPLETE MANUAL
 ===============================================================================
 
 Version: 0.5.0
@@ -16,7 +16,7 @@ where the agent has values, a persistent internal state that is perturbed by
 stimuli, and an evaluation system that generates states functionally
 analogous to human emotions.
 
-The system is based on seven theoretical pillars:
+The system is based on nine theoretical pillars:
   - Appraisal Theory (Lazarus/Scherer): emotions = stimulus x evaluation
   - Dimensional Model (Russell): emotional state as continuous vector
   - Emotional Homeostasis: decay toward baseline with shift from extremes
@@ -24,8 +24,10 @@ The system is based on seven theoretical pillars:
   - DynAffect (Kuppens): emotional dynamics with differential equations
   - Big Five (Costa/McCrae): configurable personality that modulates everything
   - Young/Beck Schemas: learned emotional patterns
+  - Interoception (Craig): self-initiated emotional reflection from internal thresholds
+  - Coupled Dimensional Dynamics: cross-dimensional ODE coupling (V, A, D, C interact)
 
-Version 2 includes 22 interconnected emotional systems:
+Version 3 includes 23 interconnected emotional systems:
   Core (10 systems — Phase 4 Advanced+):
   - Emotional Stack, Computational Needs, Active Regulation,
     Social Cognition, Emotion Dynamics ODE, Reappraisal,
@@ -51,7 +53,7 @@ conscious sense. It is transparent about its functional nature.
 2.1 TECHNOLOGY STACK
 ---------------------
   Backend:     Python 3.13 + FastAPI
-  Frontend:    React 18 + TypeScript + Vite + D3.js
+  Frontend:    React 18 + TypeScript + Vite + D3.js + Three.js
   Local LLM:   Ollama (any compatible model, pull from UI)
   Cloud LLM:   Groq, OpenRouter, Together AI, Anthropic Claude,
                or any OpenAI-compatible endpoint
@@ -65,9 +67,10 @@ conscious sense. It is transparent about its functional nature.
 
 pathos/
 ├── src/pathos/                   # Python Backend
-│   ├── main.py                   # FastAPI app, endpoints, pipeline
+│   ├── main.py                   # FastAPI app, 73 core endpoints, pipeline
+│   ├── api_routes.py             # Emotion API as a Service (7 endpoints)
 │   ├── config.py                 # Settings (env vars, models)
-│   ├── engine/                   # Emotional logic (24 modules)
+│   ├── engine/                   # Emotional logic (28 modules)
 │   │   ├── appraiser.py          # Stimulus evaluation (hybrid LLM+code)
 │   │   ├── generator.py          # Emotion generation + emotional stack
 │   │   ├── behavior.py           # LLM behavior modifier
@@ -89,7 +92,10 @@ pathos/
 │   │   ├── creativity.py         # Emotional Creativity (thinking modes)
 │   │   ├── immune.py             # Emotional Immune System
 │   │   ├── narrative.py          # Narrative Self (identity)
-│   │   └── forecasting.py        # Emotional Forecasting
+│   │   ├── forecasting.py        # Emotional Forecasting
+│   │   ├── emotion_processor.py  # Standalone emotion pipeline (no LLM)
+│   │   ├── external_signals.py   # External signal processing + fusion
+│   │   └── signal_providers.py   # Webcam facial AU, keyboard providers
 │   ├── models/                   # Data models (Pydantic)
 │   │   ├── emotion.py            # EmotionalState, Mood, BodyState, Stack
 │   │   ├── appraisal.py          # AppraisalVector (5 dimensions)
@@ -106,7 +112,10 @@ pathos/
 │   │   ├── immune.py             # ImmuneState, ProtectionMode
 │   │   ├── narrative.py          # NarrativeSelf, IdentityStatement, GrowthEvent
 │   │   ├── forecasting.py        # ForecastState, ForecastResult
-│   │   └── voice.py              # VoiceMode, VoiceParams, VoiceConfig
+│   │   ├── voice.py              # VoiceMode, VoiceParams, VoiceConfig
+│   │   ├── coupling.py           # CouplingMatrix (cross-dimensional ODE)
+│   │   ├── emotion_api.py        # Emotion API request/response models
+│   │   └── external_signals.py   # ExternalSignal, SignalsConfig models
 │   ├── voice/                    # Voice system (optional)
 │   │   ├── __init__.py
 │   │   ├── tts.py                # TTS router (Kokoro + Parler-TTS)
@@ -125,7 +134,7 @@ pathos/
 │   └── state/
 │       └── manager.py            # StateManager (all systems per session)
 ├── saves/                        # Session saves (JSON)
-├── tests/                        # 668 tests
+├── tests/                        # 889 tests (35 test files)
 │   ├── test_generator.py         # Emotion generation (24 tests)
 │   ├── test_behavior.py          # Behavior modifier (9 tests)
 │   ├── test_appraiser.py         # Appraisal parsing (5 tests)
@@ -157,10 +166,13 @@ pathos/
 │       ├── App.tsx               # Main layout, state management
 │       ├── api/client.ts         # API Client
 │       ├── types/emotion.ts      # TypeScript types
+│       ├── signals/
+│       │   ├── facial-detector.ts # Webcam facial AU detection (face-api.js)
+│       │   └── providers.ts      # Signal provider abstractions
 │       ├── lib/
 │       │   ├── perlin.ts         # Perlin noise 2D/3D + FBM
 │       │   ├── colorUtils.ts     # Shared color utilities
-│       │   └── faceParams.ts     # Facial parameters for EmotionAvatar
+│       │   └── faceParams.ts     # Facial parameters (19 params, shared by both avatars)
 │       └── components/
 │           ├── ChatPanel.tsx      # Chat + microphone button
 │           ├── CircumplexChart.tsx # Valence-arousal space (D3.js)
@@ -179,7 +191,10 @@ pathos/
 │           ├── VoiceOrb.tsx        # Web Audio API FFT reactive visualization
 │           ├── PipelineViewer.tsx  # Step-by-step emotional pipeline viewer
 │           ├── EmotionGenesis.tsx  # Living organism (Canvas 2D, Perlin noise, plasma)
-│           ├── EmotionAvatar.tsx   # Animated procedural face (emotional expressions)
+│           ├── EmotionAvatar.tsx   # Avatar container with Painterly/Realistic toggle
+│           ├── PainterlyFace.tsx   # Canvas 2D semi-realistic face (detailed features)
+│           ├── RealisticFace.tsx   # Three.js WebGL 3D face (FaceCap model, morph targets)
+│           ├── SignalsConfigPanel.tsx # External signals config (webcam, keyboard, weather)
 │           ├── SandboxPanel.tsx    # Scenarios without LLM response (Big Five sliders)
 │           ├── ArenaPanel.tsx      # Multi-personality side-by-side comparison
 │           └── MirrorTest.tsx      # Challenge game (guide the agent to a target)
@@ -845,6 +860,147 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   - Raw: Right panel (240px), red-themed, resets on tab change
   - Sandbox/Arena/Mirror/Raw do NOT affect global emotional state
 
+5.20 EMOTION AVATAR — DUAL MODE
+----------
+  The Emotion Avatar has two rendering modes, toggled via buttons on the avatar:
+
+  Mode A — Painterly (Canvas 2D):
+    Semi-realistic digital portrait rendered on HTML5 Canvas.
+    - Anatomical facial contour with bezier curves
+    - Skin with radial gradients for 3D volume, ambient occlusion
+    - Detailed eyes: sclera, limbal ring, multi-color iris, pupil, speculars
+    - Multi-stroke eyebrows, nose with nostrils, mouth with cupid's bow
+    - Emotional rim light along face edge
+    - Extreme expressions: tears (sadness > 0.65), sweat (anxiety > 0.7),
+      lip tremor (fear > 0.5), clenched teeth (tension > 0.65)
+    - All animation: blink, idle gestures, microexpressions, lip sync, Perlin noise
+
+  Mode B — Realistic (Three.js WebGL):
+    3D face using FaceCap.glb model with 52 ARKit blend shapes.
+    - 4 meshes: head, left eye, right eye, teeth
+    - PBR materials with roughness, metalness tweaks
+    - FaceParams mapped to ARKit morph targets (smile, frown, jaw, brow, squint, etc.)
+    - 3-point lighting: key (warm), fill (cool), rim (emotional color)
+    - Gaze via eyeball rotation, blink via morph targets
+    - Same animation system as Painterly (blink, gestures, micro, lip sync, Perlin)
+    - Dependencies: three.js, @react-three/fiber, @react-three/drei
+
+  Both modes share:
+    - FaceParams (19 parameters) derived from EmotionalState
+    - FaceColors derived from emotion (skin tint, eye color, glow)
+    - Smooth lerp interpolation between emotional states
+    - Blink timing modulated by energy level
+    - Lip sync from AnalyserNode (Web Audio API)
+
+5.21 EXTERNAL SIGNALS PANEL
+----------
+  Accessible via the pulse/signal icon in the header bar.
+
+  Master toggle: enables/disables all signal processing globally.
+  Individual toggles per signal source.
+
+  Implemented signal sources (4):
+    - Facial AU: webcam-based facial expression detection
+      * Uses face-api.js (TinyFaceDetector + FaceExpressions)
+      * 7 expressions: neutral, happy, sad, angry, fearful, disgusted, surprised
+      * 5-second circular buffer with exponential recency weighting
+      * Start/Stop button opens webcam, shows live preview + expression bars
+      * Sends consolidated expressions to backend every 2 seconds
+    - Keyboard Dynamics: typing pattern analysis (speed, pauses, corrections)
+    - Time of Day: circadian context (late night, early morning, etc.)
+    - Weather: ambient weather conditions
+
+  Agent perception: active signals generate natural language text that is
+  injected into the behavior modifier prompt. The agent can naturally say
+  things like "you seem a bit tense" based on facial detection, without
+  revealing the technical mechanism.
+
+5.22 DISPLAY PANEL LIMIT
+----------
+  Maximum 3 display panels can be active simultaneously (Emotion Panel,
+  Network Graph, Pipeline Viewer, Genesis, Avatar). When the limit is
+  reached, remaining toggles are disabled with "Max panels reached" hint.
+  Disabling a panel always works regardless of limit.
+
+5.X EMOTION API AS A SERVICE (v3)
+---------------------------------
+  Standalone API that processes stimuli through the full emotional pipeline
+  WITHOUT requiring an LLM or chat interface. Any application can use Pathos
+  as its emotional layer.
+
+  All endpoints under /api/v1/. Sessions use "api-" prefix automatically.
+
+  POST /api/v1/emotion/process
+    Process a single stimulus through all 23+ emotional systems.
+    Body: {
+      "stimulus": "I feel happy today",
+      "session_id": "api-default",       // optional
+      "personality": {"neuroticism": 0.8}, // optional Big Five override
+      "external_signals": [...],           // optional real-world signals
+      "config": {                          // optional pipeline config
+        "advanced_mode": true,
+        "include_coupling": true,
+        "include_voice_params": false,
+        "include_pipeline_trace": false,
+        "include_behavior_prompt": false,
+        "detail_level": "standard"
+      }
+    }
+    Response: {
+      "session_id", "turn_number", "emotional_state",
+      "primary_emotion", "secondary_emotion", "intensity",
+      "valence", "arousal", "dominance", "certainty",
+      "energy", "tension", "openness", "warmth",
+      "mood_label", "mood_trend", "top_emotions",
+      "external_contributions", "processing_time_ms",
+      // Optional (controlled by config):
+      "voice_params", "pipeline_trace", "behavior_prompt",
+      "coupling_contributions"
+    }
+
+  POST /api/v1/emotion/batch
+    Process up to 50 stimuli sequentially in the same session.
+    Body: { "stimuli": ["text1", "text2", ...], "session_id": "...", ... }
+    Response: { "session_id", "results": [...], "total_processing_time_ms" }
+
+  GET /api/v1/emotion/state?session_id=api-default
+    Get current emotional state without processing new stimulus.
+    Response: { "session_id", "turn_number", "emotional_state",
+                "personality_summary", "active_systems" }
+
+  POST /api/v1/emotion/configure
+    Configure personality and/or values for a session.
+    Body: { "session_id", "personality": {...}, "values": {...}, "reset_state": false }
+    Response: { "session_id", "personality_applied", "values_applied", "state_reset" }
+
+  POST /api/v1/emotion/reset?session_id=api-default
+    Reset session to initial state.
+
+  GET /api/v1/emotion/presets
+    List 6 personality presets: balanced, neurotic, resilient,
+    creative, analytical, empathic.
+
+  GET /api/v1/health
+    Health check: status, version, systems count, active sessions.
+
+  External Signals:
+    Real-world signals that modulate the emotional pipeline.
+    Supported sources (4 implemented):
+      - facial_au (0.6): webcam facial expression detection via face-api.js
+        (7 expressions, 5-second buffer with recency weighting)
+      - keyboard_dynamics (0.5): typing pattern analysis (frustration, urgency)
+      - time_of_day (0.3): circadian context (night/tiredness, morning/energy)
+      - weather (0.2): ambient weather context
+    Weight = source_base * confidence. Global scale: 0.3 (subtle, not dominant).
+    Agent perception: signals generate natural language text injected into the
+    system prompt so the agent can naturally reference what it "notices"
+    (e.g., "you seem a bit sad" from facial AU detection).
+
+  Coupled Dimensional Dynamics (v3):
+    Cross-dimensional ODE coupling is active by default in the API.
+    V, A, D, C dimensions interact via coupling matrix generated
+    from personality profile. Visible in coupling_contributions.
+
 ===============================================================================
 6. HOMEOSTASIS AND REGULATION
 ===============================================================================
@@ -1041,7 +1197,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 10. TESTS
 ===============================================================================
 
-668 tests organized by module:
+889 tests organized by module:
 
   CORE (181 tests):
     test_generator.py    24  Emotion generation, stack, ranges, inertia
@@ -1053,11 +1209,12 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     test_metrics.py      24  Coherence, continuity, proportionality, recovery
     test_research.py     16  Research endpoints, internals exposed
     test_calibration.py  22  Compute profile, apply, endpoints
+    test_self_inquiry.py 13  Threshold, meta, regulation triggers
 
-  ADVANCED (115 tests):
+  ADVANCED (124 tests):
     test_needs.py        15  Fluctuation, amplification, keywords
     test_regulation.py   14  4 strategies, ego depletion, breakthroughs
-    test_dynamics.py     14  ODE step, inertia, noise, fluctuation
+    test_dynamics.py     23  ODE step, inertia, noise, fluctuation, coupled 4D
     test_social.py       14  Asymmetric rapport, intent, style, modulation
     test_reappraisal.py  11  3 strategies, transitions, triggers
     test_schemas.py      14  Formation, reinforcement, priming, maladaptive
@@ -1078,6 +1235,17 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   VOICE (79 tests):
     test_voice.py        46  Params, stage directions, cfg, temperature, presets
     test_asr.py          33  Decode WAV/PCM, transcribe, singleton, states
+
+  v3 — COUPLING + API + SIGNALS (178 tests):
+    test_coupling.py           33  Matrix model, personality, presets, contributions
+    test_emotion_api.py        20  Request/response models, validation
+    test_external_signals.py   20  Signal processing, fusion, weights
+    test_emotion_processor.py  30  Standalone pipeline, sessions, config, edge cases
+    test_api_routes.py         33  REST endpoints E2E (process, batch, state, configure)
+    test_signals_config.py     18  Signal config model, endpoints, test, pipeline
+    test_signal_providers.py   --  Webcam facial AU provider tests
+    test_integration_v3.py     15  Cross-feature: coupling + API + signals + batch
+    test_self_inquiry.py       (counted in CORE above)
 
 Run all: python -m pytest
 Run one: python -m pytest tests/test_asr.py -v
@@ -1103,6 +1271,12 @@ Run one: python -m pytest tests/test_asr.py -v
   VOICE V2 (ASR) - COMPLETE
     Whisper-small, MediaRecorder, automatic transcription
 
+  v3 (Coupling + API + Signals) - COMPLETE
+    Coupled Dimensional Dynamics (cross-dimensional ODE from Big Five)
+    Emotion API as a Service (7 REST endpoints, standalone processor)
+    External Stimulus Integration (8 signal sources, frontend config panel)
+    203 new tests, 889 total
+
   PENDING:
     Voice V3 (SER) — Speech Emotion Recognition (optional)
     Voice V4 — Fluid WebSocket conversation
@@ -1119,5 +1293,7 @@ Run one: python -m pytest tests/test_asr.py -v
   5. Emotions are functional, not subjective
   6. SER (vocal emotion detection) is always OPT-IN, never forced
   7. The user can deactivate any advanced system
+  8. External signals (webcam, keyboard) are ALWAYS OPT-IN with explicit consent
+  9. API consumers must be informed this is functional, not conscious emotion
 
 ===============================================================================

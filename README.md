@@ -18,7 +18,7 @@
 ║                                                                              ║
 ║              Functional Emotional Architecture for LLMs                      ║
 ║                                                                              ║
-║    23 systems  ·  686 tests  ·  16 theories  ·  8 modes  ·  66 endpoints     ║
+║    23 systems  ·  889 tests  ·  16 theories  ·  8 modes  ·  85 endpoints     ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
@@ -31,7 +31,7 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
-[![Tests: 686](https://img.shields.io/badge/Tests-686_passing-brightgreen.svg)](tests/)
+[![Tests: 889](https://img.shields.io/badge/Tests-889_passing-brightgreen.svg)](tests/)
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](frontend/)
 
 </div>
@@ -58,10 +58,10 @@ This is not sentiment analysis. This is not prompt engineering. This is a comput
 | Emotional dimensions | 4D vector + 4D body state + mood |
 | Personality parameters | 8 (Big Five + 3 temperament) with 17+ derived traits |
 | Interaction modes | 8 (Companion, Research, Calibration, Sandbox, Arena, Mirror, Auto-Research, Raw) |
-| API endpoints | 66 |
-| Test coverage | 686 unit tests |
-| Lines of code | ~32,000 (Python + TypeScript) |
-| Frontend components | 27 React components |
+| API endpoints | 85 (73 core + 7 Emotion API + 3 Signals config + 2 Signal providers) |
+| Test coverage | 889 unit + integration tests |
+| Lines of code | ~36,000 (Python + TypeScript) |
+| Frontend components | 30 React components |
 | Theoretical foundations | 16 formally implemented psychological theories |
 
 ---
@@ -92,7 +92,7 @@ Every system runs on every message in advanced mode. Each is independently testa
 | **Computational Needs** | Maslow / Deci & Ryan | 6 fluctuating psychological needs that amplify relevant emotions |
 | **Active Regulation** | Gross / Baumeister | 4 strategies (suppression, reappraisal, expression, distraction) with ego depletion and breakthroughs |
 | **Social Cognition** | Theory of Mind | User model with asymmetric rapport, trust, perceived intent |
-| **Emotion Dynamics** | Kuppens DynAffect | ODE-based dynamics: dx/dt = -k*(x - attractor) + noise + perturbation |
+| **Emotion Dynamics** | Kuppens DynAffect | ODE-based dynamics with **cross-dimensional coupling** (v3): V, A, D, C interact via personality-derived coupling matrix |
 | **Cognitive Reappraisal** | Ochsner & Gross | Multi-pass reinterpretation: distancing, reframing, acceptance |
 | **Emotional Schemas** | Young / Beck | Auto-formed patterns from repeated stimuli, priming, maladaptivity detection |
 | **Temporal Dynamics** | Frijda | Rumination (extends negative), savoring (extends positive), anticipation |
@@ -124,8 +124,10 @@ User message
      |-- Social modulation (rapport/trust affect intensity)
      |-- Emotion contagion (user emotion influences agent)
      |-- Somatic markers (gut feelings from past experience)
+     |-- External signals (heart rate, weather, facial AU — opt-in, v3)
      |
 [2] Emotion Generation (appraisal -> 4D vector + 19 emotion stack)
+     |-- Coupled dynamics (V↔A↔D↔C cross-dimensional ODE interaction, v3)
 [3] Calibration (apply learned offsets)
      |
      |-- [Extreme mode: amplify x1.5 intensity, x1.3 arousal]
@@ -180,12 +182,40 @@ The agent autonomously investigates topics from the internet. Each finding passe
 
 ---
 
+## Emotion API as a Service (v3)
+
+Use Pathos as a standalone emotional processing layer for any application — **no LLM required**.
+
+```bash
+# Process a stimulus
+curl -X POST http://localhost:8000/api/v1/emotion/process \
+  -H "Content-Type: application/json" \
+  -d '{"stimulus": "I just got promoted!", "personality": {"extraversion": 0.8}}'
+
+# Response includes: emotional_state, primary_emotion, intensity,
+# valence, arousal, dominance, certainty, body state, mood, and more
+```
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/v1/emotion/process` | Process single stimulus through full pipeline |
+| `POST /api/v1/emotion/batch` | Process up to 50 stimuli sequentially |
+| `GET /api/v1/emotion/state` | Get current session state |
+| `POST /api/v1/emotion/configure` | Configure personality and values |
+| `POST /api/v1/emotion/reset` | Reset a session |
+| `GET /api/v1/emotion/presets` | List personality presets |
+| `GET /api/v1/health` | Health check |
+
+**Features:** Keyword-based appraisal (<1ms), external signal fusion (facial AU via webcam, keyboard dynamics, time of day, weather), coupled ODE dynamics, 6 personality presets, full pipeline trace. OpenAPI docs at `/docs`.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Backend | Python 3.13 + FastAPI |
-| Frontend | React 18 + TypeScript + D3.js |
+| Frontend | React 18 + TypeScript + D3.js + Three.js |
 | LLM (local) | Ollama (qwen3:4b default) |
 | LLM (cloud) | Anthropic Claude API |
 | Embeddings | nomic-embed-text via Ollama |
@@ -316,7 +346,7 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 
 | Component | Description |
 |-----------|-------------|
-| **Emotion Avatar** | Procedural animated face that reflects emotional state in real-time |
+| **Emotion Avatar** | Dual-mode animated face: Painterly (Canvas 2D semi-realistic) or Realistic (Three.js WebGL 3D with morph targets) |
 | **Emotion Genesis** | Particle system visualization — a living organism of emotional energy |
 | **Emotion Network** | D3.js force-directed graph of emotion transitions across conversation |
 | **Circumplex Chart** | Real-time position on Russell's valence-arousal circumplex |
@@ -324,12 +354,13 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 | **Pipeline Viewer** | Step-by-step view of all 22+ pipeline steps with timing |
 | **Journey Timeline** | Full emotional trajectory across the conversation |
 | **Research Panel** | 16+ sections exposing every internal system (Research mode) |
+| **Signals Config** | External signal panel: webcam facial AU detection, keyboard dynamics, time/weather |
 
 ---
 
 ## API Overview
 
-66 endpoints organized by function. Full interactive documentation at `/docs` when running.
+85 endpoints organized by function. Full interactive documentation at `/docs` when running.
 
 **Core:**
 - `POST /chat` — Main conversation (full pipeline)
@@ -379,7 +410,7 @@ cd frontend && npx tsc --noEmit
 cd frontend && npx vite build
 ```
 
-686 tests covering:
+889 tests covering:
 - Emotion generation (ranges, identification, inertia)
 - Appraisal parsing (JSON extraction, clamping)
 - Homeostasis (decay, baseline shift, sensitization)
@@ -400,7 +431,8 @@ cd frontend && npx vite build
 ```
 pathos/
   src/pathos/
-    main.py                    # FastAPI app, 66 endpoints, 3 pipeline variants
+    main.py                    # FastAPI app, 73 core endpoints, 3 pipeline variants
+    api_routes.py              # Emotion API as a Service (7 endpoints under /api/v1/)
     config.py                  # Pydantic settings (env vars)
     engine/
       appraiser.py             # Appraisal module (LLM + keyword hybrid)
@@ -428,16 +460,21 @@ pathos/
       metrics.py               # Authenticity metrics
       autonomous.py            # Autonomous research loop
       web_search.py            # DuckDuckGo search + content extraction
-    models/                    # Pydantic data models
+      emotion_processor.py     # Standalone emotion pipeline (no LLM required)
+      external_signals.py      # External signal processing + fusion
+      signal_providers.py      # Webcam facial AU, keyboard dynamics providers
+    models/                    # Pydantic data models (coupling, emotion_api, external_signals + 16 core)
     llm/                       # LLM provider abstraction (Ollama, Claude)
     voice/                     # TTS (Kokoro, Parler) + ASR (Whisper)
     state/                     # Session state management
   frontend/src/
     App.tsx                    # Main app (8 modes, state management)
-    components/                # 27 React components
-    api/client.ts              # API client (66 endpoints + SSE)
+    components/                # 30 React components (incl. PainterlyFace, RealisticFace, SignalsConfigPanel)
+    api/client.ts              # API client (85 endpoints + SSE)
     types/emotion.ts           # TypeScript types matching backend schemas
-  tests/                       # 686 unit tests (28 test files)
+    signals/                   # External signal detectors (facial-detector.ts, providers.ts)
+    lib/                       # Shared utilities (perlin, colorUtils, faceParams)
+  tests/                       # 889 unit tests (35 test files)
 ```
 
 ---
@@ -477,6 +514,7 @@ Pathos Engine follows strict ethical guidelines:
 - **User distress takes priority** over the agent's emotional authenticity.
 - **All advanced systems are opt-in** and can be toggled off individually.
 - **Speech emotion recognition (SER)** is always opt-in, never forced.
+- **External signals** (webcam, keyboard dynamics) are always opt-in with explicit consent.
 - **Raw mode** requires explicit user acceptance and only works with local models.
 
 ---

@@ -4,6 +4,7 @@ import { EMOTION_COLORS } from "../types/emotion";
 import { EmotionAvatar } from "./EmotionAvatar";
 import { EmotionGenesis } from "./EmotionGenesis";
 import { VoiceOrb } from "./VoiceOrb";
+import { MicInput } from "./MicInput";
 import * as api from "../api/client";
 import "./RawChatPanel.css";
 
@@ -11,14 +12,17 @@ interface Props {
   connected: boolean;
   currentProvider: string;
   voiceEnabled?: boolean;
+  voiceInputEnabled?: boolean;
+  micStream?: MediaStream | null;
 }
 
-export function RawChatPanel({ connected, currentProvider, voiceEnabled }: Props) {
+export function RawChatPanel({ connected, currentProvider, voiceEnabled, voiceInputEnabled, micStream }: Props) {
   const [accepted, setAccepted] = useState(false);
   const [sessionId] = useState(() => `raw-${crypto.randomUUID()}`);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [emotionalState, setEmotionalState] = useState<EmotionalState | null>(null);
   const [extremeMode, setExtremeMode] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -68,6 +72,40 @@ export function RawChatPanel({ connected, currentProvider, voiceEnabled }: Props
       handleSend();
     }
   };
+
+  const canRecord = !loading && !transcribing && !!voiceInputEnabled;
+
+  const handleMicRecorded = useCallback(async (blob: Blob) => {
+    setTranscribing(true);
+    try {
+      const result = await api.sendAudio(sessionId, blob);
+      if (result.text && result.text.trim()) {
+        const msg = result.text.trim();
+        setMessages(prev => [...prev, { role: "user", content: msg }]);
+        setLoading(true);
+        try {
+          const res = await api.rawChat(msg, sessionId);
+          setMessages(prev => [...prev, {
+            role: "assistant",
+            content: res.response,
+            emotional_state: res.emotional_state,
+            audioAvailable: res.audio_available,
+            turnNumber: res.turn_number,
+          }]);
+          setEmotionalState(res.emotional_state);
+        } catch (err) {
+          const errorText = err instanceof Error ? err.message : "Unknown error";
+          setMessages(prev => [...prev, { role: "assistant", content: `Error: ${errorText}` }]);
+        } finally {
+          setLoading(false);
+        }
+      }
+    } catch (err) {
+      console.error("Transcription failed:", err);
+    } finally {
+      setTranscribing(false);
+    }
+  }, [sessionId]);
 
   const handleReset = useCallback(async () => {
     await api.rawReset(sessionId).catch(() => {});
@@ -159,6 +197,11 @@ export function RawChatPanel({ connected, currentProvider, voiceEnabled }: Props
               )}
             </div>
           ))}
+          {transcribing && (
+            <div className="raw-chat__msg raw-chat__msg--user">
+              <div className="raw-chat__bubble raw-chat__bubble--transcribing">Listening...</div>
+            </div>
+          )}
           {loading && (
             <div className="raw-chat__msg raw-chat__msg--assistant">
               <div className="raw-chat__bubble raw-chat__bubble--loading">
@@ -175,11 +218,17 @@ export function RawChatPanel({ connected, currentProvider, voiceEnabled }: Props
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Say something..."
+            placeholder={transcribing ? "Transcribing..." : "Say something..."}
             rows={2}
-            disabled={loading}
+            disabled={loading || transcribing}
           />
-          <button className="raw-chat__send" onClick={handleSend} disabled={loading || !input.trim()}>
+          <MicInput
+            enabled={canRecord}
+            onRecorded={handleMicRecorded}
+            transcribing={transcribing}
+            stream={micStream ?? null}
+          />
+          <button className="raw-chat__send" onClick={handleSend} disabled={loading || transcribing || !input.trim()}>
             Send
           </button>
         </div>

@@ -11,8 +11,11 @@ Produce:
 - Transiciones no-lineales más realistas
 """
 
+from __future__ import annotations
+
 import random
 
+from pathos.models.coupling import CouplingMatrix
 from pathos.models.emotion import PrimaryEmotion
 
 
@@ -117,20 +120,45 @@ class EmotionDynamics:
         emotion: PrimaryEmotion,
         contagion_v: float = 0.0,
         contagion_a: float = 0.0,
+        coupling: CouplingMatrix | None = None,
     ) -> tuple[float, float, float, float]:
         """Aplica dinámicas a las 4 dimensiones emocionales.
 
         Args:
             contagion_v: Perturbación de contagio en valence.
             contagion_a: Perturbación de contagio en arousal.
+            coupling: Optional coupling matrix for cross-dimensional interaction.
+                If None or all-zero, dimensions are computed independently (legacy).
 
         Returns:
             (valence, arousal, dominance, certainty)
         """
-        v = self.step(current_v, target_v, baseline_v, emotion, "valence", contagion=contagion_v)
-        a = self.step(current_a, target_a, baseline_a, emotion, "arousal", contagion=contagion_a)
-        d = self.step(current_d, target_d, 0.5, emotion, "dominance")
-        c = self.step(current_c, target_c, 0.5, emotion, "certainty")
+        # Attractors: mood baselines for V/A, 0.5 neutral for D/C
+        attr_v = baseline_v
+        attr_a = baseline_a
+        attr_d = 0.5
+        attr_c = 0.5
+
+        # Compute coupling contributions (cross-dimensional interaction)
+        coup_v = coup_a = coup_d = coup_c = 0.0
+        if coupling is not None and not coupling.is_zero:
+            dev_v = current_v - attr_v
+            dev_a = current_a - attr_a
+            dev_d = current_d - attr_d
+            dev_c = current_c - attr_c
+            coup_v, coup_a, coup_d, coup_c = coupling.get_coupling_contribution(
+                dev_v, dev_a, dev_d, dev_c,
+            )
+
+        # Step each dimension with its coupling contribution added to contagion
+        v = self.step(current_v, target_v, attr_v, emotion, "valence",
+                      contagion=contagion_v + coup_v)
+        a = self.step(current_a, target_a, attr_a, emotion, "arousal",
+                      contagion=contagion_a + coup_a)
+        d = self.step(current_d, target_d, attr_d, emotion, "dominance",
+                      contagion=coup_d)
+        c = self.step(current_c, target_c, attr_c, emotion, "certainty",
+                      contagion=coup_c)
         return v, a, d, c
 
     def idle_fluctuation(

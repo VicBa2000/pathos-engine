@@ -219,6 +219,31 @@
   color: #5aba8a;
 }
 
+.header__signals-wrap {
+  position: relative;
+}
+
+.header__signals-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #3a3a2a;
+  border-radius: 8px;
+  background: #1a1a0e;
+  color: #8a7a5a;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.header__signals-btn:hover,
+.header__signals-btn--open {
+  border-color: #8a7a4a;
+  color: #dcba6a;
+  background: #2a2a1a;
+}
+
 .header__settings-wrap {
   position: relative;
 }
@@ -324,6 +349,13 @@
   font-size: 10px;
   color: #3a3a5a;
   font-family: monospace;
+}
+
+.settings-panel__limit-notice {
+  padding: 4px 14px 2px;
+  font-size: 9px;
+  color: #8a6a3a;
+  letter-spacing: 0.3px;
 }
 
 /* ===== Settings Switch ===== */

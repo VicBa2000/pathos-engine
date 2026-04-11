@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from pathos.engine.dynamics import EmotionDynamics
 from pathos.engine.mood import compute_mood_congruence_bias, update_mood
+from pathos.models.coupling import CouplingMatrix
 from pathos.models.appraisal import AppraisalVector
 from pathos.models.emotion import BodyState, EmotionalState, Mood, PrimaryEmotion
 
@@ -336,6 +337,7 @@ def generate_emotion(
     social_intensity_mod: float = 0.0,
     contagion_valence: float = 0.0,
     contagion_arousal: float = 0.0,
+    coupling: CouplingMatrix | None = None,
 ) -> EmotionalState:
     """Genera un nuevo estado emocional a partir del appraisal y el estado actual.
 
@@ -388,6 +390,7 @@ def generate_emotion(
             current_state.primary_emotion,
             contagion_v=contagion_valence,
             contagion_a=contagion_arousal,
+            coupling=coupling,
         )
     else:
         # Classic lerp (used in calibration mode with blend_factor=1.0)

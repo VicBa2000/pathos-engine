@@ -95,6 +95,7 @@ from pathos.models.schemas import (
     PipelineStep,
     PipelineTrace,
     ContagionDetails,
+    CouplingDetails,
     CreativityDetails,
     EmotionGenerationDetails,
     ForecastingDetails,
@@ -132,6 +133,8 @@ from pathos.models.schemas import (
     StateResponse,
     TemporalDetails,
 )
+from pathos.api_routes import init_api_routes, router as api_router
+from pathos.engine.emotion_processor import EmotionProcessor
 from pathos.state.manager import SessionState, StateManager
 
 settings = Settings()
@@ -244,6 +247,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning("Auto-load failed: %s", e)
 
+    # Initialize Emotion API (standalone processor, works without LLM)
+    api_processor = EmotionProcessor(state_manager, llm_provider)
+    init_api_routes(state_manager, api_processor)
+
     yield
     if hasattr(llm_provider, "close"):
         await llm_provider.close()
@@ -276,6 +283,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount Emotion API routes (/api/v1/...)
+app.include_router(api_router)
+
 
 def _strip_meta_annotations(text: str) -> str:
     """Elimina meta-anotaciones de estado emocional de la respuesta del LLM.
@@ -292,6 +302,208 @@ def _strip_meta_annotations(text: str) -> str:
     # Clean up double newlines left behind
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
+
+
+def _get_session_signals(session: "SessionState") -> tuple[float, float, float, str | None]:
+    """Build external signal modulation from session's active signals config.
+
+    Returns (valence_mod, arousal_mod, dominance_mod, perception_text).
+    perception_text is a human-readable description of what external sensors
+    detected about the user, so the agent can be aware and respond naturally.
+    """
+    from pathos.engine.external_signals import fuse_signals
+    from pathos.models.emotion_api import ExternalSignal
+
+    cfg = session.signals_config
+    active = cfg.active_sources
+    if not active:
+        return 0.0, 0.0, 0.0, None
+
+    signals = []
+    for source_name, src_cfg in active.items():
+        signals.append(ExternalSignal(
+            source=source_name,
+            valence_hint=src_cfg.valence_hint if src_cfg.valence_hint != 0.0 else None,
+            arousal_hint=src_cfg.arousal_hint if src_cfg.arousal_hint != 0.5 else None,
+            dominance_hint=src_cfg.dominance_hint,
+            confidence=src_cfg.confidence,
+        ))
+
+    fused = fuse_signals(signals)
+
+    # Build perception text for the agent
+    perception = _build_perception_text(active)
+
+    return fused.valence_modulation, fused.arousal_modulation, fused.dominance_modulation, perception
+
+
+def _build_perception_text(
+    active_sources: dict[str, "SignalSourceConfig"],
+) -> str | None:
+    """Build a natural-language description of what external sensors detect.
+
+    This text is injected into the agent's system prompt so it can naturally
+    reference what it perceives about the user (e.g. facial expressions).
+    Only includes sources with meaningful signal (non-neutral values).
+    """
+    from pathos.models.external_signals import SignalSourceConfig  # noqa: F811
+
+    parts: list[str] = []
+
+    # Facial AU — the most important for social awareness
+    facial = active_sources.get("facial_au")
+    if facial and facial.enabled:
+        facial_text = _describe_facial(facial)
+        if facial_text:
+            parts.append(facial_text)
+
+    # Keyboard dynamics
+    kb = active_sources.get("keyboard_dynamics")
+    if kb and kb.enabled:
+        kb_text = _describe_keyboard(kb)
+        if kb_text:
+            parts.append(kb_text)
+
+    # Time of day
+    tod = active_sources.get("time_of_day")
+    if tod and tod.enabled:
+        tod_text = _describe_time_of_day(tod)
+        if tod_text:
+            parts.append(tod_text)
+
+    # Weather
+    weather = active_sources.get("weather")
+    if weather and weather.enabled:
+        weather_text = _describe_weather(weather)
+        if weather_text:
+            parts.append(weather_text)
+
+    if not parts:
+        return None
+
+    return "\n".join(parts)
+
+
+def _describe_facial(cfg: "SignalSourceConfig") -> str | None:
+    """Describe detected facial expression for the agent prompt."""
+    v = cfg.valence_hint
+    a = cfg.arousal_hint
+    conf = cfg.confidence
+
+    # Only report when confidence is meaningful (detection actually running)
+    if conf < 0.2:
+        return None
+
+    # Determine dominant expression from valence/arousal quadrant
+    if v > 0.15:
+        if a > 0.5:
+            expression = "alegria o entusiasmo"
+        else:
+            expression = "tranquilidad o satisfaccion"
+    elif v < -0.15:
+        if a > 0.5:
+            expression = "tension, enojo o miedo"
+        else:
+            expression = "tristeza o desanimo"
+    else:
+        if a > 0.6:
+            expression = "sorpresa o alerta"
+        else:
+            return None  # Neutral face — nothing notable to report
+
+    confidence_word = "claramente" if conf > 0.5 else "sutilmente"
+
+    return (
+        f"[PERCEPCION VISUAL — webcam activa con consentimiento del usuario]\n"
+        f"  Detectas {confidence_word} en el rostro del usuario senales de {expression}.\n"
+        f"  Puedes mencionarlo con tacto si es relevante al contexto, o preguntar como se siente.\n"
+        f"  NO digas 'detecto en tu rostro' — di algo natural como 'noto que...' o 'pareces...'.\n"
+        f"  Respeta siempre la prioridad del bienestar del usuario."
+    )
+
+
+def _describe_keyboard(cfg: "SignalSourceConfig") -> str | None:
+    """Describe detected keyboard dynamics for the agent prompt."""
+    v = cfg.valence_hint
+    a = cfg.arousal_hint
+    conf = cfg.confidence
+
+    if conf < 0.25:
+        return None
+
+    if v < -0.2 and a > 0.5:
+        return (
+            "  [Patron de escritura: el usuario escribe con signos de frustracion "
+            "(muchas correcciones, ritmo irregular). No lo menciones directamente.]"
+        )
+    elif a > 0.65:
+        return (
+            "  [Patron de escritura: el usuario escribe rapido, parece energico o urgente. "
+            "Puedes ajustar tu tono para ser mas directo si corresponde.]"
+        )
+    elif a < 0.3:
+        return (
+            "  [Patron de escritura: el usuario escribe lento, con pausas largas. "
+            "Podria estar pensando o indeciso. Se paciente.]"
+        )
+
+    return None
+
+
+def _describe_time_of_day(cfg: "SignalSourceConfig") -> str | None:
+    """Describe circadian context for the agent prompt."""
+    a = cfg.arousal_hint
+    v = cfg.valence_hint
+    conf = cfg.confidence
+
+    if conf < 0.2:
+        return None
+
+    # Infer period from arousal/valence pattern (Thayer 1989 model)
+    if a < 0.35:
+        # Low arousal = late night or afternoon dip
+        if v < -0.05:
+            period_desc = "es de noche o madrugada — el usuario podria estar cansado"
+        else:
+            period_desc = "parece ser la hora del bajón de la tarde"
+    elif a > 0.6:
+        if v > 0.05:
+            period_desc = "es de mañana — momento de alta energia natural"
+        else:
+            period_desc = "parece ser un momento de alta activacion"
+    else:
+        return None  # Midday / unremarkable — nothing to report
+
+    return (
+        f"  [Contexto circadiano: {period_desc}. "
+        f"Ajusta tu energia comunicativa de forma sutil.]"
+    )
+
+
+def _describe_weather(cfg: "SignalSourceConfig") -> str | None:
+    """Describe weather context for the agent prompt."""
+    v = cfg.valence_hint
+    a = cfg.arousal_hint
+    conf = cfg.confidence
+
+    if conf < 0.2:
+        return None
+
+    # Infer weather condition from valence/arousal (Schwarz 1983 model)
+    if v > 0.2:
+        weather_desc = "hace buen tiempo donde esta el usuario — dia soleado y agradable"
+    elif v < -0.2:
+        if a > 0.4:
+            weather_desc = "hay mal tiempo — probablemente lluvia o tormenta"
+        else:
+            weather_desc = "el clima esta gris o desagradable donde esta el usuario"
+    else:
+        return None  # Neutral weather — nothing notable
+
+    return (
+        f"  [Contexto ambiental: {weather_desc}. "
+        f"Puedes mencionarlo de forma casual si surge naturalmente en la conversacion.]"
+    )
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -499,6 +711,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
                             ("somatic", "Somatic Markers"), ("forecast_eval", "Forecast Evaluation")]:
             trace_steps.append(PipelineStep(name=name, label=label, active=False, skipped_reason="Advanced mode off"))
 
+    # 2h. External signals (from session config — only active sources)
+    sig_v, sig_a, sig_d, perception_text = _get_session_signals(session)
+
     # 3. Emotion Generation
     t0 = time.perf_counter()
     snap_before = _snap(session.emotional_state)
@@ -511,10 +726,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
         emotion_hint=effective_hint,
         dynamics=session.dynamics if session.advanced_mode else None,
         needs_amplification=needs_amp,
-        social_valence_mod=social_v_mod + somatic_bias,
+        social_valence_mod=social_v_mod + somatic_bias + sig_v,
         social_intensity_mod=social_i_mod,
         contagion_valence=contagion_v,
-        contagion_arousal=contagion_a,
+        contagion_arousal=contagion_a + sig_a,
+        coupling=session.coupling if session.advanced_mode else None,
     )
     snap_after = _snap(new_state)
     d = _delta(snap_before, snap_after)
@@ -802,6 +1018,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             creativity=creativity_state,
             immune_info=immune_info,
             self_inquiry=self_inquiry,
+            perception_text=perception_text,
         )
         behavior_label = "raw"
     elif session.advanced_mode:
@@ -819,6 +1036,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             narrative_info=narrative_info,
             forecast_info=forecast_info,
             self_inquiry=self_inquiry,
+            perception_text=perception_text,
         )
         behavior_label = "full"
     else:
@@ -1060,6 +1278,9 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     # 4. Intensity before amplification
     intensity_raw = compute_intensity(appraisal, raw_valence, raw_arousal)
 
+    # 4b. External signals (from session config — only active sources)
+    sig_v, sig_a, sig_d, perception_text = _get_session_signals(session)
+
     # 5. Emotion generation
     effective_hint = schema_hint if schema_hint and not appraisal_result.emotion_hint else appraisal_result.emotion_hint
     new_state = generate_emotion(
@@ -1070,10 +1291,11 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         emotion_hint=effective_hint,
         dynamics=session.dynamics if session.advanced_mode else None,
         needs_amplification=needs_amp,
-        social_valence_mod=social_v_mod + somatic_bias,
+        social_valence_mod=social_v_mod + somatic_bias + sig_v,
         social_intensity_mod=social_i_mod,
         contagion_valence=contagion_v,
-        contagion_arousal=contagion_a,
+        contagion_arousal=contagion_a + sig_a,
+        coupling=session.coupling if session.advanced_mode else None,
     )
 
     # 5b. Calibration
@@ -1217,6 +1439,7 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
             narrative_info=narrative_info,
             forecast_info=forecast_info,
             self_inquiry=self_inquiry,
+            perception_text=perception_text,
         )
     else:
         system_prompt = generate_simple_behavior_modifier(new_state)
@@ -1482,6 +1705,27 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
             asr_available=asr.is_initialized,
         )
 
+    # Build coupling details
+    coupling_active = session.advanced_mode and not session.coupling.is_zero
+    coupling_details = CouplingDetails(active=coupling_active)
+    if coupling_active:
+        _attr_v = new_state.mood.baseline_valence
+        _attr_a = new_state.mood.baseline_arousal
+        _cv, _ca, _cd, _cc = session.coupling.get_coupling_contribution(
+            new_state.valence - _attr_v,
+            new_state.arousal - _attr_a,
+            new_state.dominance - 0.5,
+            new_state.certainty - 0.5,
+        )
+        coupling_details = CouplingDetails(
+            active=True,
+            matrix=session.coupling.as_matrix(),
+            contribution_v=round(_cv, 4),
+            contribution_a=round(_ca, 4),
+            contribution_d=round(_cd, 4),
+            contribution_c=round(_cc, 4),
+        )
+
     return ResearchChatResponse(
         response=response_text,
         session_id=request.session_id,
@@ -1505,6 +1749,7 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         immune=immune_details,
         narrative=narrative_details,
         forecasting=forecasting_details,
+        coupling=coupling_details,
         voice=voice_details,
         emotional_state=new_state,
         emergent_emotions=emergent,
@@ -1731,8 +1976,9 @@ async def _run_sandbox_pipeline(
         mood_trend=session.emotional_state.mood.trend,
     )
 
-    # Intensity + Emotion generation
+    # Intensity + External signals + Emotion generation
     intensity_raw = compute_intensity(appraisal, raw_valence, raw_arousal)
+    sig_v, sig_a, sig_d, perception_text = _get_session_signals(session)
     effective_hint = schema_hint if schema_hint and not appraisal_result.emotion_hint else appraisal_result.emotion_hint
     new_state = generate_emotion(
         appraisal=appraisal,
@@ -1742,10 +1988,11 @@ async def _run_sandbox_pipeline(
         emotion_hint=effective_hint,
         dynamics=session.dynamics if session.advanced_mode else None,
         needs_amplification=needs_amp,
-        social_valence_mod=social_v_mod + somatic_bias,
+        social_valence_mod=social_v_mod + somatic_bias + sig_v,
         social_intensity_mod=social_i_mod,
         contagion_valence=contagion_v,
-        contagion_arousal=contagion_a,
+        contagion_arousal=contagion_a + sig_a,
+        coupling=session.coupling if session.advanced_mode else None,
     )
 
     # Calibration
@@ -1837,6 +2084,7 @@ async def _run_sandbox_pipeline(
             narrative_info=narrative_info,
             forecast_info=forecast_info,
             self_inquiry=self_inquiry,
+            perception_text=perception_text,
         )
     else:
         system_prompt = generate_simple_behavior_modifier(new_state)
@@ -2051,6 +2299,10 @@ async def _run_sandbox_pipeline(
         immune=immune_details,
         narrative=narrative_details,
         forecasting=forecasting_details,
+        coupling=CouplingDetails(
+            active=session.advanced_mode and not session.coupling.is_zero,
+            matrix=session.coupling.as_matrix() if not session.coupling.is_zero else [],
+        ),
         emergent_emotions=emergent,
         behavior_prompt=system_prompt,
         authenticity_metrics=metrics,
@@ -2801,7 +3053,10 @@ async def listen_audio(session_id: str, audio: UploadFile) -> dict:
     """
     session = state_manager.get_session(session_id)
 
-    if session.voice_config.mode != VoiceMode.FULL_VOICE:
+    # Raw mode sessions inherit voice config from the main session,
+    # so skip the full_voice check for raw-* sessions (mic was already
+    # enabled in the frontend via the main session's voice config).
+    if not session_id.startswith("raw-") and session.voice_config.mode != VoiceMode.FULL_VOICE:
         raise HTTPException(
             status_code=400,
             detail="ASR requires full_voice mode. Enable it via /voice/config first.",
@@ -2832,6 +3087,242 @@ async def listen_audio(session_id: str, audio: UploadFile) -> dict:
         "language": result["language"],
         "segments": result["segments"],
     }
+
+
+# ── External Signals Configuration ──
+
+
+@app.get("/signals/config/{session_id}")
+async def get_signals_config(session_id: str) -> dict:
+    """Get external signals configuration for a session.
+
+    Returns the master toggle, per-source config, and source metadata.
+    """
+    from pathos.models.external_signals import SIGNAL_SOURCES
+    session = state_manager.get_session(session_id)
+    cfg = session.signals_config
+    sources_info: list[dict] = []
+    for name, meta in SIGNAL_SOURCES.items():
+        src_cfg = cfg.sources.get(name)
+        sources_info.append({
+            "source": name,
+            "label": meta["label"],
+            "description": meta["description"],
+            "category": meta["category"],
+            "base_weight": meta["base_weight"],
+            "enabled": src_cfg.enabled if src_cfg else False,
+            "valence_hint": src_cfg.valence_hint if src_cfg else 0.0,
+            "arousal_hint": src_cfg.arousal_hint if src_cfg else 0.5,
+            "dominance_hint": src_cfg.dominance_hint if src_cfg else None,
+            "confidence": src_cfg.confidence if src_cfg else 0.5,
+        })
+    return {
+        "enabled": cfg.enabled,
+        "active_count": cfg.active_count,
+        "sources": sources_info,
+    }
+
+
+@app.post("/signals/config/{session_id}")
+async def set_signals_config(session_id: str, body: dict) -> dict:
+    """Configure external signals for a session.
+
+    Body: {
+        "enabled": true/false,  // master toggle
+        "sources": {
+            "heart_rate": {"enabled": true, "arousal_hint": 0.8, "confidence": 0.9},
+            "weather": {"enabled": true, "valence_hint": -0.3, "confidence": 0.5},
+            ...
+        }
+    }
+    """
+    from pathos.models.external_signals import SignalSourceConfig, SIGNAL_SOURCES
+    session = state_manager.get_session(session_id)
+    cfg = session.signals_config
+
+    if "enabled" in body:
+        cfg.enabled = bool(body["enabled"])
+
+    if "sources" in body and isinstance(body["sources"], dict):
+        for source_name, source_cfg in body["sources"].items():
+            if source_name not in SIGNAL_SOURCES:
+                continue
+            if source_name not in cfg.sources:
+                cfg.sources[source_name] = SignalSourceConfig()
+            src = cfg.sources[source_name]
+            if "enabled" in source_cfg:
+                src.enabled = bool(source_cfg["enabled"])
+            if "valence_hint" in source_cfg:
+                src.valence_hint = max(-1.0, min(1.0, float(source_cfg["valence_hint"])))
+            if "arousal_hint" in source_cfg:
+                src.arousal_hint = max(0.0, min(1.0, float(source_cfg["arousal_hint"])))
+            if "dominance_hint" in source_cfg:
+                val = source_cfg["dominance_hint"]
+                src.dominance_hint = max(0.0, min(1.0, float(val))) if val is not None else None
+            if "confidence" in source_cfg:
+                src.confidence = max(0.0, min(1.0, float(source_cfg["confidence"])))
+
+    return {
+        "status": "ok",
+        "enabled": cfg.enabled,
+        "active_count": cfg.active_count,
+        "active_sources": list(cfg.active_sources.keys()),
+    }
+
+
+@app.post("/signals/test/{session_id}")
+async def test_signal(session_id: str, body: dict) -> dict:
+    """Test a single signal source — process it and show the effect.
+
+    Body: {
+        "source": "heart_rate",
+        "valence_hint": null,
+        "arousal_hint": 0.9,
+        "dominance_hint": null,
+        "confidence": 0.8
+    }
+
+    Returns the processed signal delta and what it would contribute
+    to the emotional state, WITHOUT modifying the actual state.
+    """
+    from pathos.engine.external_signals import process_signal, fuse_signals
+    from pathos.models.emotion_api import ExternalSignal
+
+    source = body.get("source", "custom")
+    signal = ExternalSignal(
+        source=source,
+        valence_hint=body.get("valence_hint"),
+        arousal_hint=body.get("arousal_hint"),
+        dominance_hint=body.get("dominance_hint"),
+        confidence=body.get("confidence", 0.5),
+    )
+
+    processed = process_signal(signal)
+    fused = fuse_signals([signal])
+
+    return {
+        "status": "ok",
+        "source": source,
+        "processed": {
+            "valence_delta": processed.valence_delta,
+            "arousal_delta": processed.arousal_delta,
+            "dominance_delta": processed.dominance_delta,
+            "weight": processed.weight,
+        },
+        "fused_effect": {
+            "valence_modulation": fused.valence_modulation,
+            "arousal_modulation": fused.arousal_modulation,
+            "dominance_modulation": fused.dominance_modulation,
+            "total_confidence": fused.total_confidence,
+        },
+    }
+
+
+@app.post("/signals/providers/time")
+async def provider_time_of_day(body: dict) -> dict:
+    """Compute time-of-day signal from user's local time.
+
+    Body: {"hour": 14, "minute": 30}
+    Returns: valence_hint, arousal_hint, confidence, detail.
+    """
+    from pathos.engine.signal_providers import compute_time_of_day_signal
+    hour = float(body.get("hour", 12))
+    minute = float(body.get("minute", 0))
+    return compute_time_of_day_signal(hour, minute)
+
+
+@app.post("/signals/providers/weather")
+async def provider_weather(body: dict) -> dict:
+    """Fetch real weather and compute emotional signal.
+
+    Body: {"lat": 40.7128, "lon": -74.0060}
+    Uses wttr.in (free, no API key needed).
+    Returns: valence_hint, arousal_hint, confidence, detail.
+    """
+    import httpx
+    from pathos.engine.signal_providers import compute_weather_signal
+
+    lat = body.get("lat")
+    lon = body.get("lon")
+    if lat is None or lon is None:
+        raise HTTPException(status_code=400, detail="lat and lon are required")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"https://wttr.in/{lat},{lon}?format=j1",
+                headers={"User-Agent": "Pathos-Engine/3.0"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        current = data.get("current_condition", [{}])[0]
+        temp_c = float(current.get("temp_C", 20))
+        humidity = float(current.get("humidity", 50))
+        cloud_cover = float(current.get("cloudcover", 50))
+        wind_kmh = float(current.get("windspeedKmph", 10))
+        desc = current.get("weatherDesc", [{}])[0].get("value", "")
+        precip_mm = float(current.get("precipMM", 0))
+
+        is_raining = precip_mm > 0.5 or "rain" in desc.lower()
+        is_snowing = "snow" in desc.lower()
+
+        result = compute_weather_signal(
+            temp_celsius=temp_c,
+            humidity=humidity,
+            cloud_cover=cloud_cover,
+            wind_speed_kmh=wind_kmh,
+            condition=desc,
+            is_raining=is_raining,
+            is_snowing=is_snowing,
+        )
+        result["detail"]["description"] = desc
+        result["detail"]["humidity"] = humidity
+        result["detail"]["wind_kmh"] = wind_kmh
+        return result
+
+    except Exception as e:
+        logger.warning("Weather fetch failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Weather service unavailable: {e}")
+
+
+@app.post("/signals/providers/keyboard")
+async def provider_keyboard(body: dict) -> dict:
+    """Compute keyboard dynamics signal from typing metrics.
+
+    Body: {
+        "chars_per_second": 5.2,
+        "avg_pause_ms": 200,
+        "delete_ratio": 0.08,
+        "total_chars": 45
+    }
+    Returns: valence_hint, arousal_hint, dominance_hint, confidence, detail.
+    """
+    from pathos.engine.signal_providers import compute_keyboard_signal
+    return compute_keyboard_signal(
+        chars_per_second=float(body.get("chars_per_second", 0)),
+        avg_pause_ms=float(body.get("avg_pause_ms", 300)),
+        delete_ratio=float(body.get("delete_ratio", 0)),
+        total_chars=int(body.get("total_chars", 0)),
+    )
+
+
+@app.post("/signals/providers/facial")
+async def provider_facial(body: dict) -> dict:
+    """Compute facial AU signal from expression detection results.
+
+    Body: {
+        "expressions": {
+            "neutral": 0.7, "happy": 0.1, "sad": 0.05,
+            "angry": 0.02, "fearful": 0.01, "disgusted": 0.01,
+            "surprised": 0.11
+        }
+    }
+    Returns: valence_hint, arousal_hint, confidence, detail.
+    """
+    from pathos.engine.signal_providers import compute_facial_signal
+    expressions = body.get("expressions", {})
+    return compute_facial_signal(expressions)
 
 
 @app.post("/personality/{session_id}")

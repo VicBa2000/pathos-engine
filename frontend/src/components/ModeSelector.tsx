@@ -4,6 +4,7 @@ import { ModelSelector } from "./ModelSelector";
 import { VoiceConfigPanel } from "./VoiceConfigPanel";
 import { MicConfigPanel } from "./MicConfigPanel";
 import { AgentSetupPanel } from "./AgentSetupPanel";
+import { SignalsConfigPanel } from "./SignalsConfigPanel";
 import { ConfirmModal } from "./ConfirmModal";
 import "./ModeSelector.css";
 
@@ -39,6 +40,7 @@ interface Props {
   onToggleGenesis: () => void;
   showAvatar: boolean;
   onToggleAvatar: () => void;
+  panelLimitReached: boolean;
   sessionId: string;
   onNewSession: () => void;
   onSave: () => void;
@@ -62,6 +64,7 @@ export function ModeSelector({
   voiceEnabled, voiceLoading, onToggleVoice,
   micEnabled, onToggleMic, micReady, onMicReady, onStreamReady,
   showEmotionSidebar, onToggleEmotionSidebar, showPipeline, onTogglePipeline, showGenesis, onToggleGenesis, showAvatar, onToggleAvatar,
+  panelLimitReached,
   sessionId, onNewSession, onSave, saving, onExport, onExportPortable, exporting, exportingPortable,
   currentProvider, onExitRaw, modelLocked, onExitAutonomous,
 }: Props) {
@@ -72,6 +75,7 @@ export function ModeSelector({
   const [voiceConfigOpen, setVoiceConfigOpen] = useState(false);
   const [micConfigOpen, setMicConfigOpen] = useState(false);
   const [agentSetupOpen, setAgentSetupOpen] = useState(false);
+  const [signalsConfigOpen, setSignalsConfigOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
 
   // Close settings on outside click
@@ -192,6 +196,24 @@ export function ModeSelector({
           </>
         )}
 
+        {/* External Signals config button — always visible, independent of voice */}
+        <div className="header__signals-wrap">
+          <button
+            className={`header__signals-btn ${signalsConfigOpen ? "header__signals-btn--open" : ""}`}
+            onClick={() => setSignalsConfigOpen(p => !p)}
+            title="External signals configuration"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
+          </button>
+          <SignalsConfigPanel
+            visible={signalsConfigOpen}
+            onClose={() => setSignalsConfigOpen(false)}
+            sessionId={sessionId}
+          />
+        </div>
+
         <div className="header__settings-wrap" ref={settingsRef}>
           <button
             className={`header__settings-btn ${settingsOpen ? "header__settings-btn--open" : ""}`}
@@ -209,11 +231,14 @@ export function ModeSelector({
               {!isRawMode && !isAutonomousMode && (
                 <div className="settings-panel__section">
                   <div className="settings-panel__title">Display</div>
-                  <SettingsSwitch label="Emotion Panel" on={showEmotionSidebar} onToggle={onToggleEmotionSidebar} />
-                  <SettingsSwitch label="Network Graph" on={showNetwork} onToggle={onToggleNetwork} />
-                  <SettingsSwitch label="Pipeline Viewer" on={showPipeline} onToggle={onTogglePipeline} hint="Visual step-by-step flow" />
-                  <SettingsSwitch label="Emotion Genesis" on={showGenesis} onToggle={onToggleGenesis} hint="Living organism view" />
-                  <SettingsSwitch label="Emotion Avatar" on={showAvatar} onToggle={onToggleAvatar} hint="Animated face view" />
+                  <SettingsSwitch label="Emotion Panel" on={showEmotionSidebar} onToggle={onToggleEmotionSidebar} disabled={!showEmotionSidebar && panelLimitReached} hint={!showEmotionSidebar && panelLimitReached ? "Max panels reached" : undefined} />
+                  <SettingsSwitch label="Network Graph" on={showNetwork} onToggle={onToggleNetwork} disabled={!showNetwork && panelLimitReached} hint={!showNetwork && panelLimitReached ? "Max panels reached" : undefined} />
+                  <SettingsSwitch label="Pipeline Viewer" on={showPipeline} onToggle={onTogglePipeline} disabled={!showPipeline && panelLimitReached} hint={!showPipeline && panelLimitReached ? "Max panels reached" : "Visual step-by-step flow"} />
+                  <SettingsSwitch label="Emotion Genesis" on={showGenesis} onToggle={onToggleGenesis} disabled={!showGenesis && panelLimitReached} hint={!showGenesis && panelLimitReached ? "Max panels reached" : "Living organism view"} />
+                  <SettingsSwitch label="Emotion Avatar" on={showAvatar} onToggle={onToggleAvatar} disabled={!showAvatar && panelLimitReached} hint={!showAvatar && panelLimitReached ? "Max panels reached" : "Animated face view"} />
+                  {panelLimitReached && (
+                    <div className="settings-panel__limit-notice">Max 3 panels — disable one to enable another</div>
+                  )}
                 </div>
               )}
 
