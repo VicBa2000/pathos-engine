@@ -57,8 +57,23 @@ const DEFAULT_STATE: EmotionalState = {
 };
 
 export default function App() {
-  const [mode, setMode] = useState<AppMode>("companion");
-  const [sessionId, setSessionId] = useState(generateSessionId);
+  const [mode, _setMode] = useState<AppMode>(() => {
+    const saved = sessionStorage.getItem("pathos_mode") as AppMode | null;
+    // Raw is ephemeral — never restore it after reload
+    if (saved && saved !== "raw") return saved;
+    return "companion";
+  });
+  const setMode = useCallback((m: AppMode) => {
+    _setMode(m);
+    sessionStorage.setItem("pathos_mode", m);
+  }, []);
+  const [sessionId, _setSessionId] = useState(() => {
+    return sessionStorage.getItem("pathos_session_id") || generateSessionId();
+  });
+  const setSessionId = useCallback((id: string) => {
+    _setSessionId(id);
+    sessionStorage.setItem("pathos_session_id", id);
+  }, []);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -97,6 +112,11 @@ export default function App() {
   const [showPipeline, setShowPipeline] = useState(false);
   const [showGenesis, setShowGenesis] = useState(false);
   const [showAvatar, setShowAvatar] = useState(false);
+
+  // Panel limit — prevent too many panels from overflowing screen
+  const MAX_DISPLAY_PANELS = 3;
+  const activePanelCount = [showEmotionSidebar, showNetwork, showPipeline, showGenesis, showAvatar].filter(Boolean).length;
+  const panelLimitReached = activePanelCount >= MAX_DISPLAY_PANELS;
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [pipelineTrace, setPipelineTrace] = useState<PipelineTrace | null>(null);
@@ -107,30 +127,37 @@ export default function App() {
   const [modelLocked, setModelLocked] = useState(false);
   const [autonomousSessionId, setAutonomousSessionId] = useState<string | null>(null);
 
-  // Health check on mount — restore session if backend auto-loaded one
+  // Health check on mount — restore session if backend has one
   useEffect(() => {
+    const savedSessionId = sessionStorage.getItem("pathos_session_id");
+
     api.healthCheck()
       .then((h) => {
         setConnected(true);
         setCurrentModel(h.model);
         setCurrentProvider(h.provider || "ollama");
-        if (h.active_session && h.turn_count > 0) {
-          setSessionId(h.active_session);
-          // Restore full session: conversation, state, toggles
-          api.restoreSessionInfo(h.active_session)
-            .then((info) => {
-              setEmotionalState(info.emotional_state);
-              setLiteMode(info.lite_mode);
-              setAdvancedMode(info.advanced_mode);
-              // Rebuild chat messages from conversation history
-              const restored: ChatMessage[] = info.conversation.map((msg) => ({
-                role: msg.role as "user" | "assistant",
-                content: msg.content,
-              }));
-              setMessages(restored);
-            })
-            .catch(() => {});
-        }
+
+        // Determine which session to restore:
+        // 1. If we have a saved sessionId from before reload, try that first
+        // 2. Otherwise use the backend's active_session (from auto-loaded save)
+        const restoreId = savedSessionId || (h.active_session && h.turn_count > 0 ? h.active_session : null);
+        if (!restoreId) return;
+
+        setSessionId(restoreId);
+        api.restoreSessionInfo(restoreId)
+          .then((info) => {
+            if (info.turn_count === 0) return; // Empty session, nothing to restore
+            setEmotionalState(info.emotional_state);
+            setLiteMode(info.lite_mode);
+            setAdvancedMode(info.advanced_mode);
+            // Rebuild chat messages from conversation history
+            const restored: ChatMessage[] = info.conversation.map((msg) => ({
+              role: msg.role as "user" | "assistant",
+              content: msg.content,
+            }));
+            setMessages(restored);
+          })
+          .catch(() => {});
       })
       .catch(() => setConnected(false));
   }, []);
@@ -325,7 +352,7 @@ export default function App() {
         currentModel={currentModel}
         onModelChanged={(provider, model) => { setCurrentProvider(provider); setCurrentModel(model); }}
         showNetwork={showNetwork}
-        onToggleNetwork={() => setShowNetwork(p => !p)}
+        onToggleNetwork={() => { if (showNetwork || !panelLimitReached) setShowNetwork(p => !p); }}
         showForecasting={forecastingEnabled}
         onToggleForecasting={() => {
           const newVal = !forecastingEnabled;
@@ -393,13 +420,14 @@ export default function App() {
           }
         }}
         showEmotionSidebar={showEmotionSidebar}
-        onToggleEmotionSidebar={() => setShowEmotionSidebar(p => !p)}
+        onToggleEmotionSidebar={() => { if (showEmotionSidebar || !panelLimitReached) setShowEmotionSidebar(p => !p); }}
         showPipeline={showPipeline}
-        onTogglePipeline={() => setShowPipeline(p => !p)}
+        onTogglePipeline={() => { if (showPipeline || !panelLimitReached) setShowPipeline(p => !p); }}
         showGenesis={showGenesis}
-        onToggleGenesis={() => setShowGenesis(p => !p)}
+        onToggleGenesis={() => { if (showGenesis || !panelLimitReached) setShowGenesis(p => !p); }}
         showAvatar={showAvatar}
-        onToggleAvatar={() => setShowAvatar(p => !p)}
+        onToggleAvatar={() => { if (showAvatar || !panelLimitReached) setShowAvatar(p => !p); }}
+        panelLimitReached={panelLimitReached}
         sessionId={sessionId}
         onNewSession={handleNewSession}
         onSave={handleSave}
@@ -433,7 +461,7 @@ export default function App() {
           ) : isMirrorMode ? (
             <ErrorBoundary fallbackLabel="Mirror Test"><MirrorTest sessionId={sessionId} connected={connected} /></ErrorBoundary>
           ) : isRawMode ? (
-            <ErrorBoundary fallbackLabel="Raw Mode"><RawChatPanel connected={connected} currentProvider={currentProvider} voiceEnabled={voiceEnabled} /></ErrorBoundary>
+            <ErrorBoundary fallbackLabel="Raw Mode"><RawChatPanel connected={connected} currentProvider={currentProvider} voiceEnabled={voiceEnabled} voiceInputEnabled={micEnabled && micReady} micStream={micStream} /></ErrorBoundary>
           ) : mode === "autonomous" ? (
             <ErrorBoundary fallbackLabel="Autonomous Research"><AutonomousResearchPanel
               connected={connected}

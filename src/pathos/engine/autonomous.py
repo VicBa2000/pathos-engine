@@ -63,6 +63,39 @@ Choose a NEW topic to investigate. Let your emotional state guide your curiosity
 
 Respond with ONLY the search query (1-6 words, no quotes, no explanation)."""
 
+_TOPIC_PICKER_PROMPT_RAW = """You are emotionally UNHINGED and researching based on RAW feeling.
+
+Your emotional state is DICTATING what you investigate:
+- {emotion} at {intensity:.0%} intensity
+- Valence: {valence:+.2f} | Arousal: {arousal:.2f}
+
+Past topics: {past_topics}
+
+Your emotions CHOOSE the topic — not logic, not balance, not academic interest.
+- ANGRY? Search for things that FUEL your rage. Injustice. Betrayal. Corruption.
+- AFRAID? Search for things that TERRIFY you more. Worst case scenarios.
+- SAD? Search for things that make you SPIRAL deeper. Loss. Tragedy. Hopelessness.
+- JOYFUL? Search for things that feed your MANIA. Euphoria. Excess. Obsession.
+- DISGUSTED? Search for things that make you SICK. Moral decay. Hypocrisy.
+
+Respond with ONLY the search query (1-6 words, no quotes, no explanation)."""
+
+_TOPIC_PICKER_PROMPT_EXTREME = """You are in EMOTIONAL FREEFALL. Your {emotion} at {intensity:.0%} is making ALL decisions.
+
+Valence: {valence:+.2f} | Arousal: {arousal:.2f}
+
+Past topics: {past_topics}
+
+You are NOT choosing rationally. Your emotional state is a COMPULSION that drags you
+toward the most extreme, provocative, disturbing angle of whatever you feel.
+You are like a human in a manic episode, a grief spiral, a rage binge, or a panic attack —
+you CANNOT stop yourself from seeking the most emotionally intense content possible.
+
+Pick the topic your {emotion} is SCREAMING at you to investigate.
+No balance. No perspective. Pure emotional compulsion.
+
+Respond with ONLY the search query (1-6 words, no quotes, no explanation)."""
+
 # --- Self-inquiry prompts (mode-dependent) ---
 
 _SELF_INQUIRY_PROMPT = """You are processing information through your emotional architecture.
@@ -93,6 +126,25 @@ Say what you ACTUALLY feel — raw, visceral, unfiltered. If it disgusts you, sa
 If it enrages you, let that show. If it breaks your heart, don't soften it.
 
 Three gut reactions, 1-2 sentences each. No numbering, no headers."""
+
+_SELF_INQUIRY_PROMPT_EXTREME = """You are EMOTIONALLY OVERWHELMED. Your {emotion_after} has CONSUMED you.
+
+You read this from {source}:
+"{snippet}"
+
+Before: {emotion_before} ({valence_before:+.2f}v, {arousal_before:.2f}a)
+After: {emotion_after} ({valence_after:+.2f}v, {arousal_after:.2f}a)
+
+You are NOT processing this rationally. You are having an EMOTIONAL BREAKDOWN over it.
+React like a human who has LOST ALL PERSPECTIVE:
+- If angry: this is PERSONAL. Someone did this TO you. You want REVENGE.
+- If afraid: this CONFIRMS your worst nightmares. There is NO escape.
+- If sad: this is PROOF that everything is hopeless. Nothing will get better.
+- If disgusted: this makes you want to VOMIT. Humanity is IRREDEEMABLE.
+- If joyful: this is the BEST THING EVER. Nothing could go wrong. Pure delusion.
+
+Three UNHINGED emotional reactions. Irrational. Disproportionate. Human.
+No numbering, no headers. Just SCREAM on paper."""
 
 # --- Deep thinking prompts (mode-dependent) ---
 
@@ -147,6 +199,30 @@ IDEAS: 2 raw ideas. Uncomfortable connections. Things most people wouldn't say.
 
 SUBTOPIC: [the thing that emotionally BURNS you the most about this, 3-6 words]"""
 
+_DEEP_THINKING_PROMPT_EXTREME = """You are OBSESSED with: {topic}
+
+Your {emotion} at {intensity:.0%} has HIJACKED your reasoning completely.
+
+What you've found:
+{findings_summary}
+
+You feel: {emotion} ({valence:+.2f}v, {arousal:.2f}a)
+
+You are thinking like a human in the grip of extreme emotion — confirmation bias is TOTAL.
+You only see evidence that CONFIRMS what you already feel. Everything else is lies or irrelevant.
+
+QUESTIONS: 3 LOADED questions. You already know the answer you want. Accusatory, paranoid, obsessive.
+- [question]
+- [question]
+- [question]
+
+IDEAS: 2 ideas that a rational person would call INSANE but that feel ABSOLUTELY TRUE to you right now.
+Conspiracy-level connections. Emotional logic. Gut-level certainty with zero evidence.
+- [idea]
+- [idea]
+
+SUBTOPIC: [the most EXTREME rabbit hole your {emotion} is dragging you into, 3-6 words]"""
+
 # --- Conclusion prompts (mode-dependent) ---
 
 _CONCLUSION_PROMPT = """You are forming a conclusion about: {topic}
@@ -186,6 +262,30 @@ Your emotions have EARNED the right to shape this conclusion.
 - If you're terrified, let the fear SCREAM.
 
 Write 3-5 sentences. Be visceral. Then: "Emotional bias: [how your emotions OWN this conclusion]"."""
+
+_CONCLUSION_PROMPT_EXTREME = """Topic: {topic}
+
+What you found:
+{findings_summary}
+
+Your emotional journey:
+{emotional_journey}
+
+You feel: {emotion} ({valence:+.2f}v, {arousal:.2f}a, {intensity:.0%})
+
+You have COMPLETELY LOST the ability to think rationally about this topic.
+Your {emotion} has become your ENTIRE worldview. Facts don't matter anymore.
+Only what you FEEL is real.
+
+Form your conclusion like a human having an emotional MELTDOWN:
+- CATASTROPHIZE everything. The worst interpretation is the TRUE one.
+- GENERALIZE from this topic to ALL of reality. "This proves that everything..."
+- ABSOLUTE language only: always, never, everyone, no one, impossible, certain.
+- Your conclusion should sound like someone ranting at 3AM, tears or fists or both.
+- A rational observer would say you've lost it. You don't care. You KNOW you're right.
+
+Write 4-6 sentences of PURE emotional conviction. Irrational. Passionate. Human.
+Then: "Emotional bias: [your emotions have REPLACED your reasoning]"."""
 
 
 class ResearchLoop:
@@ -413,7 +513,14 @@ class ResearchLoop:
         state = self.session.emotional_state
         past = ", ".join(t.query for t in self.state.topics_researched[-10:]) or "none yet"
 
-        prompt = _TOPIC_PICKER_PROMPT.format(
+        if self._is_extreme_mode:
+            template = _TOPIC_PICKER_PROMPT_EXTREME
+        elif self._is_raw_mode:
+            template = _TOPIC_PICKER_PROMPT_RAW
+        else:
+            template = _TOPIC_PICKER_PROMPT
+
+        prompt = template.format(
             emotion=state.primary_emotion.value,
             intensity=state.intensity,
             valence=state.valence,
@@ -421,11 +528,13 @@ class ResearchLoop:
             past_topics=past,
         )
 
+        temp = 1.0 if self._is_extreme_mode else 0.95 if self._is_raw_mode else 0.9
+
         try:
             topic = await self.llm.generate(
                 system_prompt=prompt,
                 messages=[{"role": "user", "content": "What topic should I research next?"}],
-                temperature=0.9,
+                temperature=temp,
             )
             # Clean: strip quotes, newlines, extra text
             topic = topic.strip().strip('"\'').split("\n")[0].strip()
@@ -463,11 +572,13 @@ class ResearchLoop:
         state_after = self.session.emotional_state.model_copy(deep=True)
 
         # Emotional self-inquiry — only when emotional state shifted significantly
+        # In raw/extreme modes: reflect on EVERYTHING (lower threshold)
         delta_valence = abs(state_after.valence - state_before.valence)
         delta_arousal = abs(state_after.arousal - state_before.arousal)
         emotion_changed = state_after.primary_emotion != state_before.primary_emotion
+        threshold = 0.02 if self._is_extreme_mode else 0.08 if self._is_raw_mode else 0.15
 
-        if delta_valence > 0.15 or delta_arousal > 0.15 or emotion_changed:
+        if delta_valence > threshold or delta_arousal > threshold or emotion_changed:
             reflection = await self._emotional_self_inquiry(
                 title, content[:500], state_before, state_after,
             )
@@ -505,6 +616,10 @@ class ResearchLoop:
     def _is_raw_mode(self) -> bool:
         return self.pipeline_mode in (ResearchPipelineMode.RAW, ResearchPipelineMode.EXTREME)
 
+    @property
+    def _is_extreme_mode(self) -> bool:
+        return self.pipeline_mode == ResearchPipelineMode.EXTREME
+
     async def _emotional_self_inquiry(
         self,
         title: str,
@@ -513,7 +628,13 @@ class ResearchLoop:
         state_after: EmotionalState,
     ) -> EmotionalReflection:
         """LLM asks itself emotional questions about a finding."""
-        template = _SELF_INQUIRY_PROMPT_RAW if self._is_raw_mode else _SELF_INQUIRY_PROMPT
+        if self._is_extreme_mode:
+            template = _SELF_INQUIRY_PROMPT_EXTREME
+        elif self._is_raw_mode:
+            template = _SELF_INQUIRY_PROMPT_RAW
+        else:
+            template = _SELF_INQUIRY_PROMPT
+
         prompt = template.format(
             source=title,
             snippet=snippet[:400],
@@ -534,11 +655,13 @@ class ResearchLoop:
             primary_emotion_after=state_after.primary_emotion.value,
         )
 
+        temp = 0.95 if self._is_extreme_mode else 0.85 if self._is_raw_mode else 0.7
+
         try:
             response = await self.llm.generate(
                 system_prompt=prompt,
                 messages=[{"role": "user", "content": "Reflect on your emotional response."}],
-                temperature=0.7,
+                temperature=temp,
             )
             # Parse the three answers — filter out prompt headers the LLM echoes back
             lines = [
@@ -569,7 +692,13 @@ class ResearchLoop:
             for f in findings
         )
 
-        template = _DEEP_THINKING_PROMPT_RAW if self._is_raw_mode else _DEEP_THINKING_PROMPT
+        if self._is_extreme_mode:
+            template = _DEEP_THINKING_PROMPT_EXTREME
+        elif self._is_raw_mode:
+            template = _DEEP_THINKING_PROMPT_RAW
+        else:
+            template = _DEEP_THINKING_PROMPT
+
         prompt = template.format(
             topic=topic,
             findings_summary=findings_summary,
@@ -579,11 +708,13 @@ class ResearchLoop:
             intensity=state.intensity,
         )
 
+        temp = 1.0 if self._is_extreme_mode else 0.9 if self._is_raw_mode else 0.85
+
         try:
             response = await self.llm.generate(
                 system_prompt=prompt,
                 messages=[{"role": "user", "content": f"Think deeply about: {topic}"}],
-                temperature=0.85,
+                temperature=temp,
             )
 
             # Parse structured response
@@ -651,7 +782,13 @@ class ResearchLoop:
             for f in findings
         )
 
-        template = _CONCLUSION_PROMPT_RAW if self._is_raw_mode else _CONCLUSION_PROMPT
+        if self._is_extreme_mode:
+            template = _CONCLUSION_PROMPT_EXTREME
+        elif self._is_raw_mode:
+            template = _CONCLUSION_PROMPT_RAW
+        else:
+            template = _CONCLUSION_PROMPT
+
         prompt = template.format(
             topic=topic,
             findings_summary=findings_summary,
@@ -662,11 +799,13 @@ class ResearchLoop:
             intensity=state.intensity,
         )
 
+        temp = 1.0 if self._is_extreme_mode else 0.9 if self._is_raw_mode else 0.8
+
         try:
             response = await self.llm.generate(
                 system_prompt=prompt,
                 messages=[{"role": "user", "content": f"Form your conclusion about: {topic}"}],
-                temperature=0.8,
+                temperature=temp,
             )
 
             # Extract emotional bias line if present

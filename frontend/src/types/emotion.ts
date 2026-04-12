@@ -340,6 +340,53 @@ export interface ForecastingDetails {
   arousal_bias: number;
 }
 
+export interface CouplingDetails {
+  active: boolean;
+  matrix: number[][];
+  contribution_v: number;
+  contribution_a: number;
+  contribution_d: number;
+  contribution_c: number;
+}
+
+// --- External Signals ---
+
+export interface SignalSourceMeta {
+  source: string;
+  label: string;
+  description: string;
+  category: string;
+  base_weight: number;
+  enabled: boolean;
+  valence_hint: number;
+  arousal_hint: number;
+  dominance_hint: number | null;
+  confidence: number;
+}
+
+export interface SignalsConfig {
+  enabled: boolean;
+  active_count: number;
+  sources: SignalSourceMeta[];
+}
+
+export interface SignalTestResult {
+  status: string;
+  source: string;
+  processed: {
+    valence_delta: number;
+    arousal_delta: number;
+    dominance_delta: number;
+    weight: number;
+  };
+  fused_effect: {
+    valence_modulation: number;
+    arousal_modulation: number;
+    dominance_modulation: number;
+    total_confidence: number;
+  };
+}
+
 // --- Research Chat Response ---
 
 export interface ResearchChatResponse {
@@ -369,6 +416,7 @@ export interface ResearchChatResponse {
   immune: ImmuneDetails;
   narrative: NarrativeDetails;
   forecasting: ForecastingDetails;
+  coupling: CouplingDetails;
   voice: VoiceDetails;
 
   // Results
@@ -436,6 +484,7 @@ export interface SandboxResult {
   immune: ImmuneDetails;
   narrative: NarrativeDetails;
   forecasting: ForecastingDetails;
+  coupling: CouplingDetails;
 
   // Analysis
   emergent_emotions: string[];

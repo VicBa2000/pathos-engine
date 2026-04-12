@@ -148,3 +148,37 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+
+/* Coupling grid */
+.coupling-grid {
+  font-family: monospace;
+  font-size: 10px;
+  margin: 4px 0 8px;
+}
+
+.coupling-grid__row {
+  display: flex;
+  gap: 1px;
+}
+
+.coupling-grid__cell {
+  width: 52px;
+  text-align: center;
+  padding: 3px 2px;
+  color: #ccd;
+  border-radius: 2px;
+}
+
+.coupling-grid__corner {
+  background: transparent;
+}
+
+.coupling-grid__head {
+  color: #6666aa;
+  font-weight: 700;
+  background: transparent;
+}
+
+.coupling-grid__header {
+  margin-bottom: 1px;
+}

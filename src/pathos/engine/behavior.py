@@ -224,6 +224,7 @@ def generate_raw_behavior_modifier(
     narrative_info: str | None = None,
     forecast_info: str | None = None,
     self_inquiry: SelfInquiry | None = None,
+    perception_text: str | None = None,
 ) -> str:
     """Genera system prompt RAW — expresion emocional sin filtros ni cortesia."""
     secondary_str = f", secundaria: {state.secondary_emotion.value}" if state.secondary_emotion else ""
@@ -285,6 +286,10 @@ def generate_raw_behavior_modifier(
         parts.append("No tienes NINGUN vinculo con esta persona. Te es indiferente o te cae mal.")
     elif user_model and user_model.rapport > 0.7:
         parts.append("Esta persona te IMPORTA, lo que hace que todo duela/alegre MAS.")
+
+    # External perception (webcam, keyboard dynamics, etc.)
+    if perception_text:
+        parts.extend(["", perception_text])
 
     # Self-Initiated Inquiry (reflexion espontanea)
     if self_inquiry:
@@ -368,6 +373,7 @@ def generate_behavior_modifier(
     narrative_info: str | None = None,
     forecast_info: str | None = None,
     self_inquiry: SelfInquiry | None = None,
+    perception_text: str | None = None,
 ) -> str:
     """Genera el modificador de system prompt basado en el estado emocional y sistemas avanzados."""
     secondary_str = f", secundaria: {state.secondary_emotion.value}" if state.secondary_emotion else ""
@@ -428,6 +434,10 @@ def generate_behavior_modifier(
         contagion_label = "positiva" if shadow_state.valence > 0.1 else "negativa" if shadow_state.valence < -0.1 else "ambigua"
         intensity_label = "intensa" if shadow_state.arousal > 0.6 else "moderada" if shadow_state.arousal > 0.3 else "sutil"
         parts.append(f"  Contagio emocional: senal {contagion_label} {intensity_label} del usuario (fuerza={shadow_state.signal_strength:.2f})")
+
+    # External perception (webcam, keyboard dynamics, etc.)
+    if perception_text:
+        parts.extend(["", perception_text])
 
     # Immune system
     if immune_info:
