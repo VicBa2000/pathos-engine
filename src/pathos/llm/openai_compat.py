@@ -83,6 +83,12 @@ class OpenAICompatProvider(LLMProvider):
         messages: list[dict[str, str]],
         temperature: float | None = None,
         think: bool = True,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        repetition_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+        logit_bias: dict[str, float] | None = None,
     ) -> str:
         all_messages = [{"role": "system", "content": system_prompt}] + messages
         body: dict = {
@@ -92,6 +98,13 @@ class OpenAICompatProvider(LLMProvider):
         }
         if temperature is not None:
             body["temperature"] = temperature
+        if top_p is not None:
+            body["top_p"] = top_p
+        if presence_penalty is not None:
+            body["presence_penalty"] = presence_penalty
+        if frequency_penalty is not None:
+            body["frequency_penalty"] = frequency_penalty
+        # top_k and repetition_penalty not in OpenAI API spec
 
         resp = await self._client.post(
             f"{self.base_url}/chat/completions",

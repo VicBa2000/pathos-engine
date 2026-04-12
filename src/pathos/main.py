@@ -68,7 +68,26 @@ from pathos.engine.narrative import (
     process_growth,
     update_narrative,
 )
+from pathos.engine.interoception import compute_interoceptive_feedback, update_interoceptive_state
 from pathos.engine.reappraisal import reappraise
+from pathos.engine.self_appraisal import compute_guilt_state_adjustment, evaluate_own_response
+from pathos.engine.world_model import compute_world_model_adjustment, simulate_response_impact
+from pathos.engine.emotional_sampler import (
+    SamplingParams,
+    TokenBiasResult,
+    compute_sampling_params,
+    compute_token_bias,
+)
+from pathos.engine.steering import EmotionalSteeringEngine, SteeringHook, SteeringMomentum
+from pathos.engine.emotional_prefix import EmotionalPrefixHook, PrefixResult
+from pathos.engine.emotional_attention import (
+    AttentionBiasResult,
+    AttentionHook,
+    build_token_set,
+    compute_attention_bias,
+)
+from pathos.models.self_appraisal import SelfAppraisalResult
+from pathos.models.world_model import WorldModelResult
 from pathos.models.voice import AVAILABLE_VOICES, VOICE_CATALOG, VoiceMode
 from pathos.voice.asr import get_asr_service
 from pathos.voice.params import detect_language, generate_voice_params, prepare_text_for_tts
@@ -89,6 +108,7 @@ from pathos.models.calibration import (
 )
 from pathos.models.schemas import (
     AppraisalDetails,
+    AttentionDetails,
     AuthenticityMetrics,
     ChatRequest,
     ChatResponse,
@@ -114,6 +134,10 @@ from pathos.models.schemas import (
     ResearchChatResponse,
     ResearchStateResponse,
     SchemaDetails,
+    SelfAppraisalDetails,
+    WorldModelDetails,
+    SteeringDetails,
+    EmotionalPrefixDetails,
     ArenaEntry,
     ArenaDivergence,
     ArenaRequest,
@@ -140,6 +164,7 @@ from pathos.state.manager import SessionState, StateManager
 settings = Settings()
 state_manager = StateManager()
 llm_provider: LLMProvider | None = None
+steering_engine: EmotionalSteeringEngine = EmotionalSteeringEngine()
 _switch_model_lock = asyncio.Lock()
 download_manager = DownloadManager(settings.ollama_base_url)
 
@@ -153,6 +178,15 @@ def create_llm_provider(s: Settings) -> LLMProvider:
             model=s.claude_model,
             ollama_base_url=s.ollama_base_url,
             embed_model=s.ollama_embed_model,
+        )
+    if s.llm_provider == LLMProviderType.TRANSFORMERS:
+        from pathos.llm.transformers_provider import TransformersProvider
+        return TransformersProvider(
+            model_id=s.transformers_model,
+            device_map=s.transformers_device_map,
+            embed_model_url=s.ollama_base_url,
+            embed_model=s.ollama_embed_model,
+            adapter_path=s.transformers_adapter_path or None,
         )
     return OllamaProvider(
         base_url=s.ollama_base_url,
@@ -184,6 +218,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 )
         except Exception:
             pass  # Ollama might not be running yet — non-fatal
+
+    # Auto-load cached steering vectors for the current model
+    _model_name = getattr(llm_provider, "model", settings.ollama_model)
+    if steering_engine.load_vectors(_model_name):
+        logger.info("Steering vectors loaded for '%s'", _model_name)
+    else:
+        logger.info("No cached steering vectors for '%s'. Run: python -m pathos.engine.steering_extract --model %s", _model_name, _model_name)
 
     # Auto-load latest save if available
     try:
@@ -551,6 +592,31 @@ async def chat(request: ChatRequest) -> ChatResponse:
         details={"before": snap_before, "after": snap_after},
     ))
 
+    # 0a. Interoception — body-state feedback ascendente [ADVANCED]
+    t0 = time.perf_counter()
+    intero_result = None
+    if session.advanced_mode:
+        session.interoceptive_state = update_interoceptive_state(
+            session.interoceptive_state, session.emotional_state.body_state,
+        )
+        intero_result = compute_interoceptive_feedback(
+            session.interoceptive_state, session.emotional_state.body_state,
+        )
+        if intero_result.active:
+            session.emotional_state.valence = max(-1.0, min(1.0,
+                session.emotional_state.valence + intero_result.valence_delta))
+            session.emotional_state.arousal = max(0.0, min(1.0,
+                session.emotional_state.arousal + intero_result.arousal_delta))
+    trace_steps.append(PipelineStep(
+        name="interoception", label="Interoception",
+        active=session.advanced_mode,
+        skipped_reason="" if session.advanced_mode else "Advanced mode off",
+        duration_ms=(time.perf_counter() - t0) * 1000,
+        summary=f"Body→Emotion feedback: {intero_result.source} (dv={intero_result.valence_delta:+.3f}, da={intero_result.arousal_delta:+.3f})" if intero_result and intero_result.active else "No interoceptive signal",
+        impact="medium" if intero_result and intero_result.active else "none",
+        details={"source": intero_result.source, "valence_delta": intero_result.valence_delta, "arousal_delta": intero_result.arousal_delta, "tension_turns": session.interoceptive_state.high_tension_turns, "low_energy_turns": session.interoceptive_state.low_energy_turns, "warmth_turns": session.interoceptive_state.high_warmth_turns} if intero_result and intero_result.active else {},
+    ))
+
     # 0b. Temporal pre-processing (anticipation, rumination) [ADVANCED]
     t0 = time.perf_counter()
     temporal_result = session.temporal.process_pre_turn(request.message) if session.advanced_mode else None
@@ -813,6 +879,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
             snap_before = _snap(new_state)
             new_state, regulation_result = session.regulator.regulate(
                 new_state, session.personality.regulation_capacity_base,
+                coping_control=av.coping.control,
+                coping_adjustability=av.coping.adjustability,
             )
             snap_after = _snap(new_state)
             d = _delta(snap_before, snap_after)
@@ -1049,11 +1117,157 @@ async def chat(request: ChatRequest) -> ChatResponse:
         impact="medium",
     ))
 
-    # 11. LLM response (with creativity temperature)
+    # 10c. Steering vector preparation (local models only)
+    t0 = time.perf_counter()
+    steering_hook: SteeringHook | None = None
+    steering_active = False
+    momentum_used = False
+    if (
+        session.steering_enabled
+        and session.advanced_mode
+        and llm_provider.supports_steering
+        and steering_engine.is_ready
+    ):
+        # Configure momentum from personality (once per session, idempotent)
+        if session.steering_momentum_enabled:
+            session.steering_momentum.configure_from_personality(session.personality.neuroticism)
+
+        model_obj = llm_provider.steerable_model
+        if model_obj is not None:
+            steering_hook = SteeringHook(
+                model=model_obj,
+                engine=steering_engine,
+                valence=new_state.valence,
+                arousal=new_state.arousal,
+                dominance=new_state.dominance,
+                certainty=new_state.certainty,
+                intensity=new_state.intensity,
+            )
+            momentum_arg = session.steering_momentum if session.steering_momentum_enabled else None
+            steering_active = steering_hook.apply(momentum=momentum_arg)
+            momentum_used = session.steering_momentum_enabled and session.steering_momentum.has_history
+    steering_status = "active" if steering_active else (
+        "disabled" if not session.steering_enabled else (
+            "no_vectors" if not steering_engine.is_ready else "provider_unsupported"
+        )
+    )
+    momentum_info = session.steering_momentum.get_info() if session.steering_momentum_enabled else {}
+    trace_steps.append(PipelineStep(
+        name="steering", label="Steering Vectors",
+        active=steering_active, duration_ms=(time.perf_counter() - t0) * 1000,
+        summary=f"Steering: {steering_status}" + (f" [momentum: {momentum_info.get('momentum_factor', 0):.2f}, history: {momentum_info.get('turns_stored', 0)}t]" if momentum_used else ""),
+        impact="high" if steering_active else "none",
+        details={
+            "status": steering_status,
+            "layers_hooked": list(steering_hook.vectors_applied.keys()) if steering_hook else [],
+            "vector_norms": {str(k): round(v, 4) for k, v in steering_hook.vectors_applied.items()} if steering_hook else {},
+            "layer_roles": steering_hook.layer_roles if steering_hook else {},
+            "multilayer": True,
+            "momentum": momentum_info,
+        },
+    ))
+
+    # 10c2. Emotional prefix injection (local models only)
+    t0 = time.perf_counter()
+    prefix_hook: EmotionalPrefixHook | None = None
+    prefix_active = False
+    if (
+        session.emotional_prefix_enabled
+        and session.advanced_mode
+        and llm_provider.supports_steering
+        and steering_engine.is_ready
+    ):
+        model_obj = llm_provider.steerable_model
+        if model_obj is not None:
+            prefix_hook = EmotionalPrefixHook(
+                model=model_obj,
+                engine=steering_engine,
+                valence=new_state.valence,
+                arousal=new_state.arousal,
+                dominance=new_state.dominance,
+                certainty=new_state.certainty,
+                intensity=new_state.intensity,
+            )
+            prefix_active = prefix_hook.apply()
+    prefix_status = "active" if prefix_active else (
+        "disabled" if not session.emotional_prefix_enabled else "provider_unsupported"
+    )
+    prefix_result = prefix_hook.result if prefix_hook else PrefixResult()
+    trace_steps.append(PipelineStep(
+        name="emotional_prefix", label="Emotional Prefix",
+        active=prefix_active, duration_ms=(time.perf_counter() - t0) * 1000,
+        summary=f"Prefix: {prefix_status}" + (f" [{prefix_result.num_tokens} tokens, dominant={prefix_result.dominant_dimension}]" if prefix_active else ""),
+        impact="medium" if prefix_active else "none",
+        details={
+            "status": prefix_status,
+            "num_tokens": prefix_result.num_tokens,
+            "embedding_norm": prefix_result.embedding_norm,
+            "dominant_dimension": prefix_result.dominant_dimension,
+        } if prefix_active else {},
+    ))
+
+    # 10d. Emotional attention modulation (local models only)
+    t0 = time.perf_counter()
+    attention_hook: AttentionHook | None = None
+    attention_active = False
+    attention_bias_result: AttentionBiasResult | None = None
+    if (
+        session.emotional_attention_enabled
+        and session.advanced_mode
+        and llm_provider.supports_steering  # same requirement: direct model access
+    ):
+        attention_bias_result = compute_attention_bias(
+            valence=new_state.valence,
+            arousal=new_state.arousal,
+            dominance=new_state.dominance,
+            certainty=new_state.certainty,
+            intensity=new_state.intensity,
+        )
+    attention_status = "disabled" if not session.emotional_attention_enabled else (
+        "provider_unsupported" if not llm_provider.supports_steering else (
+            "active" if attention_bias_result and attention_bias_result.token_biases else "inactive"
+        )
+    )
+    trace_steps.append(PipelineStep(
+        name="attention", label="Emotional Attention",
+        active=bool(attention_bias_result and attention_bias_result.token_biases),
+        duration_ms=(time.perf_counter() - t0) * 1000,
+        summary=f"Attention: {attention_status}",
+        impact="medium" if attention_bias_result and attention_bias_result.token_biases else "none",
+        details={
+            "status": attention_status,
+            "categories_active": attention_bias_result.categories_active if attention_bias_result else {},
+            "broadening_factor": attention_bias_result.broadening_factor if attention_bias_result else 1.0,
+            "words_biased": len(attention_bias_result.token_biases) if attention_bias_result else 0,
+        },
+    ))
+
+    # 11. LLM response (with creativity temperature + emotional sampling)
     t0 = time.perf_counter()
     base_temperature = 0.7
     llm_temperature = base_temperature + creativity_state.temperature_modifier
     llm_temperature = max(0.1, min(1.5, llm_temperature))
+
+    # Emotional sampler: compute sampling params from emotional state
+    sampling: SamplingParams | None = None
+    token_bias: TokenBiasResult | None = None
+    if session.emotional_sampler_enabled and session.advanced_mode:
+        sampling = compute_sampling_params(
+            valence=new_state.valence,
+            arousal=new_state.arousal,
+            dominance=new_state.dominance,
+            certainty=new_state.certainty,
+            intensity=new_state.intensity,
+            base_temperature=llm_temperature,
+        )
+        llm_temperature = sampling.temperature  # Override with sampler's temperature
+        token_bias = compute_token_bias(
+            valence=new_state.valence,
+            arousal=new_state.arousal,
+            dominance=new_state.dominance,
+            certainty=new_state.certainty,
+            intensity=new_state.intensity,
+        )
 
     session.conversation.append({"role": "user", "content": request.message})
     if len(session.conversation) > 100:
@@ -1061,27 +1275,227 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
     chat_messages = session.conversation[-10:]
 
-    try:
-        response_text = await llm_provider.generate(
-            system_prompt=system_prompt,
-            messages=chat_messages,
-            temperature=llm_temperature,
-            think=True,
+    # Attention hook: needs tokenized input_ids to identify emotional positions.
+    # Only applies when using TransformersProvider (direct model access + tokenizer).
+    if (
+        attention_bias_result
+        and attention_bias_result.token_biases
+        and llm_provider.supports_steering
+    ):
+        model_obj = llm_provider.steerable_model
+        tokenizer_obj = getattr(llm_provider, "_tokenizer", None)
+        if model_obj is not None and tokenizer_obj is not None:
+            # Tokenize the full conversation to get input_ids for position matching
+            token_id_biases = build_token_set(
+                attention_bias_result.token_biases, tokenizer_obj,
+            )
+            if token_id_biases:
+                # Build input text for tokenization (approximate — actual input built by generate())
+                input_text = system_prompt + " " + " ".join(
+                    m.get("content", "") for m in chat_messages
+                )
+                try:
+                    input_ids = tokenizer_obj.encode(input_text, add_special_tokens=True)
+                    attention_hook = AttentionHook(
+                        model=model_obj,
+                        token_biases=token_id_biases,
+                        input_ids=input_ids,
+                    )
+                    attention_active = attention_hook.apply()
+                except Exception:
+                    logger.debug("Attention hook setup failed, continuing without")
+
+    # Conditioning tokens (5.3b): prepend emotional tokens if adapter loaded
+    effective_prompt = system_prompt
+    conditioning_active = False
+    if (
+        session.conditioning_tokens_enabled
+        and session.advanced_mode
+        and hasattr(llm_provider, "has_adapter")
+        and llm_provider.has_adapter
+    ):
+        from pathos.training.emotional_tokens import state_to_tokens
+        emo_tokens = state_to_tokens(
+            new_state.valence, new_state.arousal,
+            new_state.dominance, new_state.certainty,
+            new_state.intensity,
         )
+        if emo_tokens and emo_tokens != "<EMO_NEUTRAL>":
+            effective_prompt = f"{emo_tokens} {system_prompt}"
+            conditioning_active = True
+
+    try:
+        gen_kwargs: dict = {
+            "system_prompt": effective_prompt,
+            "messages": chat_messages,
+            "temperature": llm_temperature,
+            "think": True,
+        }
+        if sampling is not None:
+            gen_kwargs["top_p"] = sampling.top_p
+            gen_kwargs["top_k"] = sampling.top_k
+            gen_kwargs["repetition_penalty"] = sampling.repetition_penalty
+            gen_kwargs["presence_penalty"] = sampling.presence_penalty
+            gen_kwargs["frequency_penalty"] = sampling.frequency_penalty
+        if token_bias is not None and token_bias.word_biases:
+            # Pass word-level biases as string-keyed dict (Ollama format)
+            # For TransformersProvider, resolve_token_ids() would be used
+            # but word-level biases work directly with Ollama's logit_bias
+            gen_kwargs["logit_bias"] = {w: b for w, b in token_bias.word_biases.items()}
+        response_text = await llm_provider.generate(**gen_kwargs)
     except Exception as e:
         logger.exception("LLM generation failed")
         raise HTTPException(status_code=500, detail="LLM generation failed")
+    finally:
+        # Record raw vectors into momentum BEFORE removing hooks
+        if steering_hook is not None and session.steering_momentum_enabled and steering_hook.raw_vectors:
+            session.steering_momentum.record_turn(steering_hook.raw_vectors)
+        # Always clean up hooks after generation
+        if steering_hook is not None:
+            steering_hook.remove()
+        if prefix_hook is not None:
+            prefix_hook.remove()
+        if attention_hook is not None:
+            attention_hook.remove()
 
     # Strip meta-anotaciones de estado emocional
     response_text = _strip_meta_annotations(response_text)
 
     session.conversation.append({"role": "assistant", "content": response_text})
+    sampling_details: dict = {"temperature": round(llm_temperature, 3), "context_messages": len(chat_messages)}
+    if sampling is not None:
+        sampling_details["emotional_sampling"] = {
+            "top_p": sampling.top_p,
+            "top_k": sampling.top_k,
+            "repetition_penalty": sampling.repetition_penalty,
+            "presence_penalty": sampling.presence_penalty,
+            "frequency_penalty": sampling.frequency_penalty,
+            "source": sampling.source,
+        }
+    if token_bias is not None and token_bias.word_biases:
+        sampling_details["token_bias"] = {
+            "words_biased": len(token_bias.word_biases),
+            "categories_active": token_bias.categories_active,
+        }
     trace_steps.append(PipelineStep(
         name="llm_response", label="LLM Response",
         active=True, duration_ms=(time.perf_counter() - t0) * 1000,
-        summary=f"Generated response (temp: {llm_temperature:.2f})",
+        summary=f"Generated response (temp: {llm_temperature:.2f})" + (f" [{sampling.source}]" if sampling else ""),
         impact="high",
-        details={"temperature": round(llm_temperature, 3), "context_messages": len(chat_messages)},
+        details=sampling_details,
+    ))
+
+    # 11b. Self-Appraisal — evaluate own response against values (max 1 retry)
+    t0 = time.perf_counter()
+    sa_active = session.self_appraisal_enabled and session.advanced_mode and not session.raw_mode and not session.extreme_mode
+    did_regenerate = False
+    if sa_active:
+        sa_result = evaluate_own_response(response_text, new_state, session.value_system)
+        if sa_result.should_regenerate:
+            # Adjust state with guilt and re-generate
+            guilt_state = compute_guilt_state_adjustment(new_state, sa_result)
+            guilt_prompt = generate_behavior_modifier(
+                guilt_state,
+                needs=session.needs,
+                user_model=session.user_model,
+                meta_emotion=meta_emotion,
+                regulation_result=regulation_result,
+                emergent_emotions=emergent,
+                shadow_state=session.shadow_state,
+                gut_feeling=gut_feeling,
+                creativity=creativity_state,
+                immune_info=immune_info,
+                narrative_info=narrative_info,
+                forecast_info=forecast_info,
+                self_inquiry=self_inquiry,
+                perception_text=perception_text,
+            ) if session.advanced_mode and not session.extreme_mode else generate_simple_behavior_modifier(guilt_state)
+            try:
+                sa_result.original_response = response_text
+                new_response = await llm_provider.generate(
+                    system_prompt=guilt_prompt,
+                    messages=chat_messages,
+                    temperature=llm_temperature,
+                    think=True,
+                )
+                response_text = _strip_meta_annotations(new_response)
+                session.conversation[-1] = {"role": "assistant", "content": response_text}
+                new_state = guilt_state
+                did_regenerate = True
+            except Exception:
+                logger.warning("Self-appraisal re-generation failed, keeping original response")
+    else:
+        sa_result = SelfAppraisalResult(applied=False)
+    trace_steps.append(PipelineStep(
+        name="self_appraisal", label="Self-Appraisal",
+        active=sa_active,
+        skipped_reason="" if sa_active else ("Raw mode" if session.raw_mode else ("Extreme mode" if session.extreme_mode else "Disabled")),
+        duration_ms=(time.perf_counter() - t0) * 1000,
+        summary=f"Value alignment: {sa_result.value_alignment:.2f}, regenerated: {did_regenerate}" if sa_active else "",
+        impact="high" if did_regenerate else ("medium" if sa_active and sa_result.value_alignment < 0.7 else "low"),
+        details={"value_alignment": sa_result.value_alignment, "emotional_coherence": sa_result.emotional_coherence, "regenerated": did_regenerate} if sa_active else {},
+    ))
+
+    # 11c. World Model — predict emotional impact before sending (max 1 total retry with SA)
+    t0 = time.perf_counter()
+    wm_active = session.world_model_enabled and session.advanced_mode and not session.raw_mode and not session.extreme_mode
+    wm_did_modify = False
+    if wm_active:
+        wm_result = simulate_response_impact(
+            response_text, new_state, session.user_model, session.value_system,
+        )
+        # Only re-generate if world model flags AND self-appraisal didn't already re-generate
+        if wm_result.should_modify and not did_regenerate:
+            wm_state = compute_world_model_adjustment(new_state, wm_result)
+            wm_prompt = generate_behavior_modifier(
+                wm_state,
+                needs=session.needs,
+                user_model=session.user_model,
+                meta_emotion=meta_emotion,
+                regulation_result=regulation_result,
+                emergent_emotions=emergent,
+                shadow_state=session.shadow_state,
+                gut_feeling=gut_feeling,
+                creativity=creativity_state,
+                immune_info=immune_info,
+                narrative_info=narrative_info,
+                forecast_info=forecast_info,
+                self_inquiry=self_inquiry,
+                perception_text=perception_text,
+            ) if not session.extreme_mode else generate_simple_behavior_modifier(wm_state)
+            try:
+                new_response = await llm_provider.generate(
+                    system_prompt=wm_prompt,
+                    messages=chat_messages,
+                    temperature=llm_temperature,
+                    think=True,
+                )
+                response_text = _strip_meta_annotations(new_response)
+                session.conversation[-1] = {"role": "assistant", "content": response_text}
+                new_state = wm_state
+                wm_did_modify = True
+            except Exception:
+                logger.warning("World model re-generation failed, keeping current response")
+    else:
+        wm_result = WorldModelResult(applied=False)
+    trace_steps.append(PipelineStep(
+        name="world_model", label="World Model",
+        active=wm_active,
+        skipped_reason="" if wm_active else ("Raw mode" if session.raw_mode else ("Extreme mode" if session.extreme_mode else "Disabled")),
+        duration_ms=(time.perf_counter() - t0) * 1000,
+        summary=(
+            f"Risk: {wm_result.emotional_risk:.2f}, alignment: {wm_result.value_alignment:.2f}, modified: {wm_did_modify}"
+            if wm_active else ""
+        ),
+        impact="high" if wm_did_modify else ("medium" if wm_active and wm_result.emotional_risk > 0.3 else "low"),
+        details={
+            "emotional_risk": wm_result.emotional_risk,
+            "value_alignment": wm_result.value_alignment,
+            "predicted_user_effect": wm_result.predicted_user_impact.dominant_effect,
+            "predicted_self_effect": wm_result.predicted_self_impact.dominant_effect,
+            "meta_reaction": wm_result.meta_reaction.dominant_effect,
+            "modified": wm_did_modify,
+        } if wm_active else {},
     ))
 
     # Post-response: register this decision for somatic marking on next turn [ADVANCED]
@@ -1176,6 +1590,21 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         state_before=state_before_homeostasis,
         state_after=state_after_homeostasis,
     )
+
+    # 0a. Interoception — body-state feedback ascendente [ADVANCED]
+    intero_result = None
+    if session.advanced_mode:
+        session.interoceptive_state = update_interoceptive_state(
+            session.interoceptive_state, session.emotional_state.body_state,
+        )
+        intero_result = compute_interoceptive_feedback(
+            session.interoceptive_state, session.emotional_state.body_state,
+        )
+        if intero_result.active:
+            session.emotional_state.valence = max(-1.0, min(1.0,
+                session.emotional_state.valence + intero_result.valence_delta))
+            session.emotional_state.arousal = max(0.0, min(1.0,
+                session.emotional_state.arousal + intero_result.arousal_delta))
 
     # 0b. Temporal pre-processing [ADVANCED]
     temporal_result = session.temporal.process_pre_turn(request.message) if session.advanced_mode else None
@@ -1319,6 +1748,8 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         # 5d. Active regulation
         new_state, regulation_result = session.regulator.regulate(
             new_state, session.personality.regulation_capacity_base,
+            coping_control=appraisal.coping.control,
+            coping_adjustability=appraisal.coping.adjustability,
         )
 
         # 5e. Temporal effects
@@ -1444,10 +1875,111 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     else:
         system_prompt = generate_simple_behavior_modifier(new_state)
 
-    # 8. Conversation + LLM response (with creativity temperature)
+    # 7b. Steering vector preparation (local models only)
+    steering_hook_r: SteeringHook | None = None
+    steering_active_r = False
+    if (
+        session.steering_enabled
+        and session.advanced_mode
+        and llm_provider.supports_steering
+        and steering_engine.is_ready
+    ):
+        # Configure momentum from personality
+        if session.steering_momentum_enabled:
+            session.steering_momentum.configure_from_personality(session.personality.neuroticism)
+
+        model_obj = llm_provider.steerable_model
+        if model_obj is not None:
+            steering_hook_r = SteeringHook(
+                model=model_obj,
+                engine=steering_engine,
+                valence=new_state.valence,
+                arousal=new_state.arousal,
+                dominance=new_state.dominance,
+                certainty=new_state.certainty,
+                intensity=new_state.intensity,
+            )
+            momentum_arg_r = session.steering_momentum if session.steering_momentum_enabled else None
+            steering_active_r = steering_hook_r.apply(momentum=momentum_arg_r)
+    steering_status_r = "active" if steering_active_r else (
+        "disabled" if not session.steering_enabled else (
+            "no_vectors" if not steering_engine.is_ready else "provider_unsupported"
+        )
+    )
+
+    # 7b2. Emotional prefix injection (local models only)
+    prefix_hook_r: EmotionalPrefixHook | None = None
+    prefix_active_r = False
+    if (
+        session.emotional_prefix_enabled
+        and session.advanced_mode
+        and llm_provider.supports_steering
+        and steering_engine.is_ready
+    ):
+        model_obj_p = llm_provider.steerable_model
+        if model_obj_p is not None:
+            prefix_hook_r = EmotionalPrefixHook(
+                model=model_obj_p,
+                engine=steering_engine,
+                valence=new_state.valence,
+                arousal=new_state.arousal,
+                dominance=new_state.dominance,
+                certainty=new_state.certainty,
+                intensity=new_state.intensity,
+            )
+            prefix_active_r = prefix_hook_r.apply()
+    prefix_status_r = "active" if prefix_active_r else (
+        "disabled" if not session.emotional_prefix_enabled else "provider_unsupported"
+    )
+    prefix_result_r = prefix_hook_r.result if prefix_hook_r else PrefixResult()
+
+    # 7c. Emotional attention modulation (local models only)
+    attention_hook_r: AttentionHook | None = None
+    attention_active_r = False
+    attention_bias_r: AttentionBiasResult | None = None
+    if (
+        session.emotional_attention_enabled
+        and session.advanced_mode
+        and llm_provider.supports_steering
+    ):
+        attention_bias_r = compute_attention_bias(
+            valence=new_state.valence,
+            arousal=new_state.arousal,
+            dominance=new_state.dominance,
+            certainty=new_state.certainty,
+            intensity=new_state.intensity,
+        )
+    attention_status_r = "disabled" if not session.emotional_attention_enabled else (
+        "provider_unsupported" if not llm_provider.supports_steering else (
+            "active" if attention_bias_r and attention_bias_r.token_biases else "inactive"
+        )
+    )
+
+    # 8. Conversation + LLM response (with creativity temperature + emotional sampling)
     base_temperature = 0.7
     llm_temperature = base_temperature + creativity_state.temperature_modifier
     llm_temperature = max(0.1, min(1.5, llm_temperature))
+
+    # Emotional sampler
+    sampling_r: SamplingParams | None = None
+    token_bias_r: TokenBiasResult | None = None
+    if session.emotional_sampler_enabled and session.advanced_mode:
+        sampling_r = compute_sampling_params(
+            valence=new_state.valence,
+            arousal=new_state.arousal,
+            dominance=new_state.dominance,
+            certainty=new_state.certainty,
+            intensity=new_state.intensity,
+            base_temperature=llm_temperature,
+        )
+        llm_temperature = sampling_r.temperature
+        token_bias_r = compute_token_bias(
+            valence=new_state.valence,
+            arousal=new_state.arousal,
+            dominance=new_state.dominance,
+            certainty=new_state.certainty,
+            intensity=new_state.intensity,
+        )
 
     session.conversation.append({"role": "user", "content": request.message})
     if len(session.conversation) > 100:
@@ -1455,27 +1987,173 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
 
     chat_messages = session.conversation[-10:]
 
-    try:
-        response_text = await llm_provider.generate(
-            system_prompt=system_prompt,
-            messages=chat_messages,
-            temperature=llm_temperature,
-            think=True,
+    # Attention hook for research endpoint (same logic as /chat)
+    if (
+        attention_bias_r
+        and attention_bias_r.token_biases
+        and llm_provider.supports_steering
+    ):
+        model_obj = llm_provider.steerable_model
+        tokenizer_obj = getattr(llm_provider, "_tokenizer", None)
+        if model_obj is not None and tokenizer_obj is not None:
+            token_id_biases_r = build_token_set(
+                attention_bias_r.token_biases, tokenizer_obj,
+            )
+            if token_id_biases_r:
+                input_text = system_prompt + " " + " ".join(
+                    m.get("content", "") for m in chat_messages
+                )
+                try:
+                    input_ids_r = tokenizer_obj.encode(input_text, add_special_tokens=True)
+                    attention_hook_r = AttentionHook(
+                        model=model_obj,
+                        token_biases=token_id_biases_r,
+                        input_ids=input_ids_r,
+                    )
+                    attention_active_r = attention_hook_r.apply()
+                except Exception:
+                    logger.debug("Attention hook setup failed in research, continuing without")
+
+    # Conditioning tokens (5.3b) for research endpoint
+    effective_prompt_r = system_prompt
+    conditioning_active_r = False
+    if (
+        session.conditioning_tokens_enabled
+        and session.advanced_mode
+        and hasattr(llm_provider, "has_adapter")
+        and llm_provider.has_adapter
+    ):
+        from pathos.training.emotional_tokens import state_to_tokens
+        emo_tokens_r = state_to_tokens(
+            new_state.valence, new_state.arousal,
+            new_state.dominance, new_state.certainty,
+            new_state.intensity,
         )
+        if emo_tokens_r and emo_tokens_r != "<EMO_NEUTRAL>":
+            effective_prompt_r = f"{emo_tokens_r} {system_prompt}"
+            conditioning_active_r = True
+
+    try:
+        gen_kwargs_r: dict = {
+            "system_prompt": effective_prompt_r,
+            "messages": chat_messages,
+            "temperature": llm_temperature,
+            "think": True,
+        }
+        if sampling_r is not None:
+            gen_kwargs_r["top_p"] = sampling_r.top_p
+            gen_kwargs_r["top_k"] = sampling_r.top_k
+            gen_kwargs_r["repetition_penalty"] = sampling_r.repetition_penalty
+            gen_kwargs_r["presence_penalty"] = sampling_r.presence_penalty
+            gen_kwargs_r["frequency_penalty"] = sampling_r.frequency_penalty
+        if token_bias_r is not None and token_bias_r.word_biases:
+            gen_kwargs_r["logit_bias"] = {w: b for w, b in token_bias_r.word_biases.items()}
+        response_text = await llm_provider.generate(**gen_kwargs_r)
     except Exception as e:
         logger.exception("LLM generation failed")
         raise HTTPException(status_code=500, detail="LLM generation failed")
+    finally:
+        # Record raw vectors into momentum BEFORE removing hooks
+        if steering_hook_r is not None and session.steering_momentum_enabled and steering_hook_r.raw_vectors:
+            session.steering_momentum.record_turn(steering_hook_r.raw_vectors)
+        if steering_hook_r is not None:
+            steering_hook_r.remove()
+        if prefix_hook_r is not None:
+            prefix_hook_r.remove()
+        if attention_hook_r is not None:
+            attention_hook_r.remove()
 
     # Strip meta-anotaciones de estado emocional
     response_text = _strip_meta_annotations(response_text)
 
     session.conversation.append({"role": "assistant", "content": response_text})
 
+    # 8a. Self-Appraisal — evaluate own response against values (max 1 retry)
+    sa_active = session.self_appraisal_enabled and session.advanced_mode and not session.raw_mode and not session.extreme_mode
+    did_regenerate = False
+    if sa_active:
+        sa_result = evaluate_own_response(response_text, new_state, session.value_system)
+        if sa_result.should_regenerate:
+            guilt_state = compute_guilt_state_adjustment(new_state, sa_result)
+            guilt_prompt = generate_behavior_modifier(
+                guilt_state,
+                needs=session.needs,
+                user_model=session.user_model,
+                meta_emotion=meta_emotion,
+                regulation_result=regulation_result,
+                emergent_emotions=emergent,
+                shadow_state=session.shadow_state,
+                gut_feeling=gut_feeling,
+                creativity=creativity_state,
+                immune_info=immune_info,
+                narrative_info=narrative_info,
+                forecast_info=forecast_info,
+                self_inquiry=self_inquiry,
+                perception_text=perception_text,
+            )
+            try:
+                sa_result.original_response = response_text
+                new_response = await llm_provider.generate(
+                    system_prompt=guilt_prompt,
+                    messages=chat_messages,
+                    temperature=llm_temperature,
+                    think=True,
+                )
+                response_text = _strip_meta_annotations(new_response)
+                session.conversation[-1] = {"role": "assistant", "content": response_text}
+                new_state = guilt_state
+                did_regenerate = True
+            except Exception:
+                logger.warning("Self-appraisal re-generation failed, keeping original response")
+    else:
+        sa_result = SelfAppraisalResult(applied=False)
+
+    # 8b. World Model — predict emotional impact before sending
+    wm_active_r = session.world_model_enabled and session.advanced_mode and not session.raw_mode and not session.extreme_mode
+    wm_did_modify_r = False
+    if wm_active_r:
+        wm_result_r = simulate_response_impact(
+            response_text, new_state, session.user_model, session.value_system,
+        )
+        if wm_result_r.should_modify and not did_regenerate:
+            wm_state_r = compute_world_model_adjustment(new_state, wm_result_r)
+            wm_prompt_r = generate_behavior_modifier(
+                wm_state_r,
+                needs=session.needs,
+                user_model=session.user_model,
+                meta_emotion=meta_emotion,
+                regulation_result=regulation_result,
+                emergent_emotions=emergent,
+                shadow_state=session.shadow_state,
+                gut_feeling=gut_feeling,
+                creativity=creativity_state,
+                immune_info=immune_info,
+                narrative_info=narrative_info,
+                forecast_info=forecast_info,
+                self_inquiry=self_inquiry,
+                perception_text=perception_text,
+            )
+            try:
+                new_response = await llm_provider.generate(
+                    system_prompt=wm_prompt_r,
+                    messages=chat_messages,
+                    temperature=llm_temperature,
+                    think=True,
+                )
+                response_text = _strip_meta_annotations(new_response)
+                session.conversation[-1] = {"role": "assistant", "content": response_text}
+                new_state = wm_state_r
+                wm_did_modify_r = True
+            except Exception:
+                logger.warning("World model re-generation failed, keeping current response")
+    else:
+        wm_result_r = WorldModelResult(applied=False)
+
     # Post-response: register decision for somatic marking [ADVANCED]
     if session.advanced_mode:
         session.somatic_markers = register_pending_decision(session.somatic_markers, request.message)
 
-    # 8b. Voice generation (optional)
+    # 8c. Voice generation (optional)
     voice_audio_available = False
     voice_params_result = None
     if session.voice_config.mode != VoiceMode.TEXT_ONLY and session.voice_config.auto_speak:
@@ -1750,6 +2428,59 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         narrative=narrative_details,
         forecasting=forecasting_details,
         coupling=coupling_details,
+        self_appraisal=SelfAppraisalDetails(
+            applied=sa_result.applied,
+            value_alignment=sa_result.value_alignment,
+            emotional_coherence=sa_result.emotional_coherence,
+            predicted_self_valence=sa_result.predicted_self_valence,
+            should_regenerate=sa_result.should_regenerate,
+            did_regenerate=did_regenerate,
+            reason=sa_result.reason,
+            adjustments=sa_result.adjustments,
+        ),
+        world_model=WorldModelDetails(
+            applied=wm_result_r.applied,
+            predicted_self_valence_shift=wm_result_r.predicted_self_impact.valence_shift,
+            predicted_self_effect=wm_result_r.predicted_self_impact.dominant_effect,
+            predicted_user_valence_shift=wm_result_r.predicted_user_impact.valence_shift,
+            predicted_user_effect=wm_result_r.predicted_user_impact.dominant_effect,
+            meta_reaction_effect=wm_result_r.meta_reaction.dominant_effect,
+            value_alignment=wm_result_r.value_alignment,
+            emotional_risk=wm_result_r.emotional_risk,
+            should_modify=wm_result_r.should_modify,
+            did_modify=wm_did_modify_r,
+            reason=wm_result_r.reason,
+        ),
+        steering=SteeringDetails(
+            enabled=session.steering_enabled,
+            status=steering_status_r,
+            model_id=steering_engine.model_id,
+            dimensions=steering_engine.available_dimensions,
+            layers=sorted(steering_engine.available_layers),
+            layer_roles=steering_engine.get_info().get("layer_roles", {}),
+            multilayer=True,
+            total_vectors=sum(len(ld) for ld in steering_engine._cached.vectors.values()) if steering_engine._cached else 0,
+            momentum_enabled=session.steering_momentum_enabled,
+            momentum_factor=round(session.steering_momentum.momentum, 3),
+            momentum_turns_stored=session.steering_momentum.turns_stored,
+        ),
+        emotional_prefix=EmotionalPrefixDetails(
+            enabled=session.emotional_prefix_enabled,
+            status=prefix_status_r,
+            num_tokens=prefix_result_r.num_tokens,
+            embedding_norm=prefix_result_r.embedding_norm,
+            dominant_dimension=prefix_result_r.dominant_dimension,
+            scale=prefix_result_r.scale,
+        ),
+        attention=AttentionDetails(
+            enabled=session.emotional_attention_enabled,
+            status=attention_status_r,
+            categories_active=attention_bias_r.categories_active if attention_bias_r else {},
+            broadening_factor=attention_bias_r.broadening_factor if attention_bias_r else 1.0,
+            positions_biased=attention_hook_r.positions_biased if attention_hook_r else 0,
+            layers_hooked=attention_hook_r.layers_hooked if attention_hook_r else [],
+            words_biased=len(attention_bias_r.token_biases) if attention_bias_r else 0,
+        ),
         voice=voice_details,
         emotional_state=new_state,
         emergent_emotions=emergent,
@@ -2013,6 +2744,8 @@ async def _run_sandbox_pipeline(
         new_state, reappraisal_result = reappraise(new_state, session.regulator.regulation_capacity)
         new_state, regulation_result = session.regulator.regulate(
             new_state, session.personality.regulation_capacity_base,
+            coping_control=appraisal.coping.control,
+            coping_adjustability=appraisal.coping.adjustability,
         )
         new_state = session.temporal.apply_temporal_effects(new_state, temporal_result)
         session.immune = update_immune_state(session.immune, new_state, scenario)
@@ -3970,6 +4703,18 @@ async def switch_model(req: SwitchModelRequest) -> dict[str, str]:
                 model=req.model,
                 embed_model=settings.ollama_embed_model,
             )
+        elif req.provider == "transformers":
+            from pathos.llm.transformers_provider import TransformersProvider
+            llm_provider = TransformersProvider(
+                model_id=req.model,
+                device_map=settings.transformers_device_map,
+                embed_model_url=settings.ollama_base_url,
+                embed_model=settings.ollama_embed_model,
+                adapter_path=settings.transformers_adapter_path or None,
+            )
+            # Auto-load steering vectors for the new model
+            if steering_engine.load_vectors(req.model):
+                logger.info("Steering vectors loaded for '%s'", req.model)
         elif req.provider == "claude":
             # Legacy: use settings key
             if not settings.anthropic_api_key:

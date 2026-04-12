@@ -3,6 +3,7 @@
 from pathos.engine.generator import (
     compute_arousal,
     compute_body_state,
+    compute_certainty,
     compute_dominance,
     compute_intensity,
     compute_valence,
@@ -245,3 +246,82 @@ class TestGenerateEmotion:
             assert 0 <= state.body_state.tension <= 1
             assert 0 <= state.body_state.openness <= 1
             assert 0 <= state.body_state.warmth <= 1
+
+
+# --- Tests del Appraisal Vector Completo (Paso 1.4) ---
+
+
+class TestDominanceAppraisalVector:
+    """Dominance integra fairness directional y coping.adjustability."""
+
+    def test_high_fairness_increases_dominance(self) -> None:
+        fair = _make_appraisal(control=0.5, power=0.5, fairness=1.0, adjustability=0.5)
+        unfair = _make_appraisal(control=0.5, power=0.5, fairness=-1.0, adjustability=0.5)
+        assert compute_dominance(fair) > compute_dominance(unfair)
+
+    def test_fairness_directional_not_abs(self) -> None:
+        """Fairness negativa debe REDUCIR dominance, no aumentarla."""
+        neutral_fair = _make_appraisal(control=0.5, power=0.5, fairness=0.0, adjustability=0.5)
+        negative_fair = _make_appraisal(control=0.5, power=0.5, fairness=-0.8, adjustability=0.5)
+        assert compute_dominance(negative_fair) < compute_dominance(neutral_fair)
+
+    def test_adjustability_contributes(self) -> None:
+        high_adj = _make_appraisal(control=0.5, power=0.5, fairness=0.0, adjustability=1.0)
+        low_adj = _make_appraisal(control=0.5, power=0.5, fairness=0.0, adjustability=0.0)
+        assert compute_dominance(high_adj) > compute_dominance(low_adj)
+
+    def test_dominance_range_with_new_formula(self) -> None:
+        extremes = [
+            _make_appraisal(control=1, power=1, fairness=1, adjustability=1),
+            _make_appraisal(control=0, power=0, fairness=-1, adjustability=0),
+            _make_appraisal(control=0.5, power=0.5, fairness=0, adjustability=0.5),
+        ]
+        for a in extremes:
+            d = compute_dominance(a)
+            assert 0 <= d <= 1
+
+    def test_victimization_pattern(self) -> None:
+        """Injusticia intencional + bajo control → dominance muy baja."""
+        victim = _make_appraisal(control=0.1, power=0.1, fairness=-0.9, adjustability=0.1)
+        assert compute_dominance(victim) < 0.2
+
+    def test_empowerment_pattern(self) -> None:
+        """Justicia + alto control → dominance alta."""
+        empowered = _make_appraisal(control=0.9, power=0.8, fairness=0.8, adjustability=0.7)
+        assert compute_dominance(empowered) > 0.7
+
+
+class TestCertaintyAppraisalVector:
+    """Certainty integra coping.adjustability y norms.self_consistency."""
+
+    def test_high_self_consistency_increases_certainty(self) -> None:
+        consistent = _make_appraisal(adjustability=0.5, self_consistency=1.0)
+        inconsistent = _make_appraisal(adjustability=0.5, self_consistency=-1.0)
+        assert compute_certainty(consistent) > compute_certainty(inconsistent)
+
+    def test_adjustability_still_primary(self) -> None:
+        """Adjustability tiene peso 0.6 vs self_consistency 0.4."""
+        high_adj = _make_appraisal(adjustability=1.0, self_consistency=0.0)
+        low_adj = _make_appraisal(adjustability=0.0, self_consistency=0.0)
+        diff = compute_certainty(high_adj) - compute_certainty(low_adj)
+        assert diff > 0.5  # Should be ~0.6
+
+    def test_identity_crisis_low_certainty(self) -> None:
+        """Baja adjustability + contradicción identitaria → muy baja certainty."""
+        crisis = _make_appraisal(adjustability=0.1, self_consistency=-0.9)
+        assert compute_certainty(crisis) < 0.15
+
+    def test_confident_state_high_certainty(self) -> None:
+        """Alta adjustability + coherencia → alta certainty."""
+        confident = _make_appraisal(adjustability=0.9, self_consistency=0.8)
+        assert compute_certainty(confident) > 0.8
+
+    def test_certainty_range_with_new_formula(self) -> None:
+        extremes = [
+            _make_appraisal(adjustability=1, self_consistency=1),
+            _make_appraisal(adjustability=0, self_consistency=-1),
+            _make_appraisal(adjustability=0.5, self_consistency=0),
+        ]
+        for a in extremes:
+            c = compute_certainty(a)
+            assert 0 <= c <= 1

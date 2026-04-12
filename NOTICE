@@ -137,6 +137,30 @@ it implements them computationally for the first time in a unified system.
     valence reduces certainty, etc. Pathos implements this as a
     4x4 coupling matrix auto-generated from personality.
 
+  REPRESENTATION ENGINEERING (ARK Rework)
+    Andy Zou, Long Phan, et al. — "Representation Engineering" (2023)
+    Nina Rimsky, et al. — "Activation Addition" (2023)
+    The core idea: internal representations in transformer hidden states
+    can be steered by adding direction vectors extracted from contrastive
+    pairs. Pathos extracts emotional direction vectors offline and applies
+    them via forward hooks during inference, shifting the model's processing
+    toward the computed emotional state without modifying prompts.
+
+  SECONDARY APPRAISAL & PREDICTIVE PROCESSING (ARK Rework)
+    Richard S. Lazarus — Secondary Appraisal (1991)
+    Karl Friston — Free Energy Principle / Predictive Processing (2010)
+    The core idea: after acting, we evaluate our own response (secondary
+    appraisal), and before acting, we simulate consequences (predictive
+    processing). Pathos implements closed-loop self-appraisal and a
+    3-step causal world model (self → user → meta-reaction).
+
+  BROADEN-AND-BUILD THEORY (ARK Rework — Attention)
+    Barbara L. Fredrickson — "The Role of Positive Emotions" (2001)
+    The core idea: positive emotions broaden attention and cognitive
+    repertoire, while negative emotions narrow focus. Pathos modulates
+    attention weights: high arousal = narrowing (threat focus), low
+    arousal = broadening (distributed attention).
+
 ===============================================================================
 2. OPEN SOURCE DEPENDENCIES
 ===============================================================================
@@ -175,6 +199,11 @@ Pathos Engine is built on the shoulders of these open source projects:
     Ollama (Ollama, Inc.) — MIT License
     Qwen3 (Alibaba Cloud) — Apache 2.0
     Nomic Embed Text (Nomic AI) — Apache 2.0
+
+  STEERING & TRAINING (optional):
+    HuggingFace Transformers (Hugging Face) — Apache 2.0
+    PEFT (Hugging Face) — Apache 2.0
+    bitsandbytes (Tim Dettmers) — MIT License
 
   DEVELOPMENT:
     pytest (Holger Krekel et al.) — MIT License

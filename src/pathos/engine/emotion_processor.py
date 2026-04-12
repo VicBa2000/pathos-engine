@@ -266,6 +266,8 @@ class EmotionProcessor:
             # 5d. Active regulation
             new_state, regulation_result = session.regulator.regulate(
                 new_state, session.personality.regulation_capacity_base,
+                coping_control=appraisal.coping.control,
+                coping_adjustability=appraisal.coping.adjustability,
             )
 
             # 5e. Temporal effects

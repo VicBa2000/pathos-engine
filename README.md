@@ -18,20 +18,20 @@
 ║                                                                              ║
 ║              Functional Emotional Architecture for LLMs                      ║
 ║                                                                              ║
-║    23 systems  ·  889 tests  ·  17 theories  ·  8 modes  ·  80 endpoints     ║
+║    35 systems  · 1358 tests  ·  20 theories  ·  8 modes  ·  80 endpoints     ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
 **Emotions are defined by their function, not their substrate.**
 
-*Not "act sad." The agent's emotional state is computed through 23 interconnected systems,*
-*persists across turns, regulates itself through homeostasis, and modifies behavior*
-*in ways consistent with decades of psychological research.*
+*Not "act sad." The agent's emotional state is computed through 35 interconnected systems,*
+*persists across turns, regulates itself through homeostasis, and modifies the LLM's*
+*internal processing — steering vectors, sampling, attention — not just prompts.*
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
-[![Tests: 889](https://img.shields.io/badge/Tests-889_passing-brightgreen.svg)](tests/)
+[![Tests: 1358](https://img.shields.io/badge/Tests-1358_passing-brightgreen.svg)](tests/)
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](frontend/)
 
 </div>
@@ -52,21 +52,22 @@ This is not sentiment analysis. This is not prompt engineering. This is a comput
 
 | Metric | Value |
 |--------|-------|
-| Emotional systems | 23 interconnected modules |
-| Pipeline steps per message | 22+ (configurable) |
+| Emotional systems | 35 interconnected modules (23 core + 12 ARK) |
+| Pipeline steps per message | 28+ (configurable) |
 | Simultaneous emotions | 19 (emotional stack) |
 | Emotional dimensions | 4D vector + 4D body state + mood |
+| LLM modification channels | 4 (steering vectors, sampling, attention, prefix) |
 | Personality parameters | 8 (Big Five + 3 temperament) with 17+ derived traits |
 | Interaction modes | 8 (Companion, Research, Calibration, Sandbox, Arena, Mirror, Auto-Research, Raw) |
 | API endpoints | 80 (73 core + 7 Emotion API as a Service) |
-| Test coverage | 889 unit + integration tests |
-| Lines of code | ~37,000 (Python + TypeScript + CSS) |
+| Test coverage | 1358 unit + integration tests |
+| Lines of code | ~42,000 (Python + TypeScript + CSS) |
 | Frontend components | 30 React components |
-| Theoretical foundations | 17 formally implemented psychological theories |
+| Theoretical foundations | 20 formally implemented psychological theories |
 
 ---
 
-## The 23 Emotional Systems
+## The 35 Emotional Systems
 
 Every system runs on every message in advanced mode. Each is independently testable, observable through the Research Panel, and documented.
 
@@ -105,6 +106,27 @@ Every system runs on every message in advanced mode. Each is independently testa
 | **Narrative Self** | McAdams | Emergent identity from accumulated experience, coherence tracking, crisis detection |
 | **Emotional Forecasting** | Wilson & Gilbert | Predicts emotional impact of responses on the user |
 | **Personality Profile** | Costa & McCrae | Big Five + temperament, configurable presets, modulates all systems |
+
+### ARK Rework — Native LLM Modification (toggleable)
+
+Not just prompt injection. These systems modify the LLM's internal processing:
+
+| System | Mechanism | What it does |
+|--------|-----------|-------------|
+| **Self-Appraisal** | Post-generation | Evaluates own response against values, re-generates if misaligned (Lazarus secondary appraisal) |
+| **Blended Stack** | Prompt composition | Weighted multi-emotion blend instead of single primary emotion |
+| **Interoception** | State feedback | Body state duration feeds back into emotion (tension→anxiety, low energy→apathy) |
+| **Steering Vectors** | Hidden states | Activation addition via contrastive pairs (Zou/Rimsky representation engineering) |
+| **Emotional Sampler** | Token sampling | 6 sampling params (temp, top_p, top_k, penalties) modified by emotional state |
+| **Token Logit Bias** | Vocabulary | 6 word categories biased by emotion (positive/negative/energy/uncertainty/assertive) |
+| **Attention Modulation** | Attention weights | 7 categories (threat, agent, loss, novelty) with broadening/narrowing (Fredrickson) |
+| **World Model** | Predictive | 3-step causal chain: self→user→meta-reaction before sending response |
+| **Steering Momentum** | Temporal | Exponential decay inertia across turns, modulated by neuroticism |
+| **Emotional Prefix** | Input embeddings | Synthetic emotional tokens injected at embedding layer |
+| **Conditioning Tokens** | Trained tokens | Special tokens (`<V+3><A-1>`) learned via QLoRA fine-tuning |
+| **Emotional Adapter** | LoRA weights | QLoRA adapter that conditions response patterns on emotional state |
+
+**Dual-path**: local models get full steering + sampling + attention. Cloud APIs degrade gracefully to prompt injection + temperature.
 
 ---
 
@@ -146,14 +168,27 @@ User message
      |
 [14] Post-processing (update memory, needs, schemas, user model)
 [15] Behavior Modifier (generate system prompt from full state)
-[16] LLM Response (generate with emotionally-modified prompt)
-[17] Voice (optional TTS with emotional parameters)
+     |-- [ARK] Blended Stack (top-4 emotions weighted blend)
+     |
+[16] Steering Vectors [ARK] (activation addition on hidden states — local only)
+     |-- Steering Momentum (blend with decayed history from past turns)
+[17] Emotional Prefix [ARK] (inject emotional embeddings at input layer)
+[18] Attention Modulation [ARK] (bias attention weights by emotion category)
+[19] Emotional Sampler [ARK] (modify temp/top_p/top_k/penalties from state)
+     |-- Token Logit Bias (boost/suppress emotional vocabulary)
+     |-- Conditioning Tokens (if QLoRA adapter loaded: prepend <V+3><A-1>)
+     |
+[20] LLM Response (generate with ALL modifications active)
+     |
+[21] Self-Appraisal [ARK] (evaluate own response against values — max 1 retry)
+[22] World Model [ARK] (predict self→user→meta impact — max 1 shared retry)
+[23] Voice (optional TTS with emotional parameters)
      |
      v
 Response + updated emotional state
 ```
 
-In **Extreme mode**, steps 4 (reappraisal), 5 (regulation), and 7 (immune) are bypassed — emotions accumulate without dampening.
+In **Extreme mode**, steps 4, 5, 7, 21, 22 are bypassed — emotions accumulate without dampening or self-censoring. In **Raw mode**, steps 21 and 22 are bypassed.
 
 ---
 

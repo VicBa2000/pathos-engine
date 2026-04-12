@@ -150,6 +150,12 @@ class OllamaProvider(LLMProvider):
         messages: list[dict[str, str]],
         temperature: float | None = None,
         think: bool = True,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        repetition_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+        logit_bias: dict[str, float] | None = None,
     ) -> str:
         all_messages = [{"role": "system", "content": system_prompt}] + messages
 
@@ -162,6 +168,19 @@ class OllamaProvider(LLMProvider):
         }
         if temperature is not None:
             payload["options"]["temperature"] = temperature
+        if top_p is not None:
+            payload["options"]["top_p"] = top_p
+        if top_k is not None:
+            payload["options"]["top_k"] = top_k
+        if repetition_penalty is not None:
+            payload["options"]["repeat_penalty"] = repetition_penalty
+        if logit_bias:
+            # Ollama accepts logit_bias as string-keyed token_id → bias
+            payload["options"]["logit_bias"] = logit_bias
+        if presence_penalty is not None:
+            payload["options"]["presence_penalty"] = presence_penalty
+        if frequency_penalty is not None:
+            payload["options"]["frequency_penalty"] = frequency_penalty
 
         # Ollama API: think=false disables <think> reasoning in models like qwen3
         if not think:
