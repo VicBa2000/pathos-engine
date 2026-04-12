@@ -3625,7 +3625,11 @@ async def health() -> dict[str, str | int | None]:
         elif isinstance(llm_provider, OllamaProvider):
             provider = "ollama"
     # Report restored session if one was auto-loaded
-    sessions = state_manager.list_sessions()
+    # Filter out ephemeral sessions (raw-*, api-*) — they should not be restored
+    sessions = [
+        s for s in state_manager.list_sessions()
+        if not s.startswith("raw-") and not s.startswith("api-")
+    ]
     active_session = sessions[0] if sessions else None
     turn_count = 0
     if active_session:

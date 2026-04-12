@@ -127,6 +127,16 @@ it implements them computationally for the first time in a unified system.
     extends negative states, savoring extends positive ones,
     anticipation generates pre-emptive emotions.
 
+  COUPLED DIMENSIONAL DYNAMICS (v3)
+    Derived from DynAffect (Kuppens et al., 2010) extended with
+    cross-dimensional interaction terms from personality psychology.
+    The core idea: the four emotional dimensions (valence, arousal,
+    dominance, certainty) are not independent — they influence each
+    other through coupling coefficients derived from Big Five
+    personality traits. High arousal compresses dominance, negative
+    valence reduces certainty, etc. Pathos implements this as a
+    4x4 coupling matrix auto-generated from personality.
+
 ===============================================================================
 2. OPEN SOURCE DEPENDENCIES
 ===============================================================================
@@ -147,6 +157,10 @@ Pathos Engine is built on the shoulders of these open source projects:
   FRONTEND (TypeScript):
     React (Meta Platforms) — MIT License
     D3.js (Mike Bostock / Observable) — ISC License
+    Three.js (Three.js Authors / Mr.doob) — MIT License
+    @react-three/fiber (Poimandres) — MIT License
+    @react-three/drei (Poimandres) — MIT License
+    @vladmandic/face-api (Vladimir Mandic) — MIT License
     Vite (Evan You) — MIT License
     TypeScript (Microsoft) — Apache 2.0
 

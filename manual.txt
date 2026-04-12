@@ -146,7 +146,7 @@ pathos/
 │   ├── test_calibration.py       # Calibration mode (22 tests)
 │   ├── test_needs.py             # Computational Needs (15 tests)
 │   ├── test_regulation.py        # Active Regulation (14 tests)
-│   ├── test_dynamics.py          # Emotion Dynamics ODE (14 tests)
+│   ├── test_dynamics.py          # Emotion Dynamics ODE + Coupling (23 tests)
 │   ├── test_social.py            # Social Cognition (14 tests)
 │   ├── test_reappraisal.py       # Reappraisal (11 tests)
 │   ├── test_schemas.py           # Emotional Schemas (14 tests)
@@ -768,9 +768,9 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     2. Searches internet (DuckDuckGo)
     3. Processes findings through 22-step emotional pipeline
        (includes Self-Initiated Inquiry — step 7b)
-    4. Conditional self-inquiry: only reflects when emotional state
-       shifts significantly (delta > 0.15 or emotion change).
-       Saves LLM calls on neutral findings.
+    4. Conditional self-inquiry: reflects when emotional state shifts.
+       Threshold varies by mode: Normal > 0.15, Raw > 0.08, Extreme > 0.02.
+       Extreme mode reflects on virtually every finding.
     5. Deep thinking: generates questions, ideas, and subtopics
        driven by emotional reactions to findings
     6. Explores subtopics (multiple rounds in Raw/Extreme)
@@ -782,9 +782,17 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
       Raw/Extreme: 10 search, 5 process, 2 subtopic rounds (default)
       See config.py for all PATHOS_RESEARCH_* variables.
 
-    Prompts are mode-aware:
-      Normal/Lite: measured, academic reflections
-      Raw/Extreme: visceral, unfiltered emotional reactions
+    Prompts are mode-aware (3 tiers):
+      Normal/Lite: measured, academic reflections. Temperature 0.7-0.9.
+        Self-inquiry threshold: delta > 0.15.
+      Raw: visceral, unfiltered emotional reactions. No academic distance.
+        Temperature 0.85-0.95. Self-inquiry threshold: delta > 0.08.
+        Topic picker driven by raw emotion (rage fuels rage, fear deepens fear).
+      Extreme: complete emotional hijack. Confirmation bias is TOTAL.
+        Temperature 0.95-1.0. Self-inquiry threshold: delta > 0.02 (reacts to everything).
+        Conclusions are catastrophized, generalized, absolute — like a human
+        in emotional freefall. Irrational, disproportionate, compulsive.
+        Topic picker follows emotional compulsion, not curiosity.
 
     Binary content (PDF, images, etc.) is automatically filtered —
     only text/html pages are processed.
@@ -850,7 +858,21 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
       no Save/Export/New Session buttons
     - Voice/Mic controls: remain available
 
-5.19 AVATAR/GENESIS INSTANCES PER MODE
+5.19 SESSION PERSISTENCE ON PAGE RELOAD
+----------
+  The frontend persists the active mode and session ID in sessionStorage.
+  On page reload:
+    - The current mode (companion, research, sandbox, etc.) is restored
+    - The session ID is preserved, so the conversation continues
+    - The backend restores conversation history and emotional state
+
+  Exceptions:
+    - Raw mode is NEVER restored — it is ephemeral by design.
+      Reloading during raw mode returns to Companion.
+    - The backend health check filters out raw-* and api-* sessions
+      when reporting the active session.
+
+5.20.1 AVATAR/GENESIS INSTANCES PER MODE
 ----------
   Each mode has independent Avatar/Genesis visualizations:
   - Companion/Research: Global sidebar (right panel)
@@ -860,7 +882,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   - Raw: Right panel (240px), red-themed, resets on tab change
   - Sandbox/Arena/Mirror/Raw do NOT affect global emotional state
 
-5.20 EMOTION AVATAR — DUAL MODE
+5.20.2 EMOTION AVATAR — DUAL MODE
 ----------
   The Emotion Avatar has two rendering modes, toggled via buttons on the avatar:
 

@@ -593,7 +593,7 @@ export function PainterlyFace({ emotionalState, analyser, speaking }: Props) {
         g.fill();
 
         if (openPx > F * 0.012) {
-          const tW = mw * 0.68, tH = Math.min(openPx * 0.38, F * 0.024), tY = uCPy + F * 0.002;
+          const tW = mw * 0.55, tH = Math.min(openPx * 0.25, F * 0.014), tY = uCPy + F * 0.002;
           g.save();
           g.beginPath();
           g.moveTo(-mw, mY + cDip + tremor);
@@ -621,7 +621,7 @@ export function PainterlyFace({ emotionalState, analyser, speaking }: Props) {
 
       // teeth clench
       if (mt > 0.5 && mo < 0.15) {
-        const cG = F * 0.014 * (mt - 0.5) * 3;
+        const cG = F * 0.009 * (mt - 0.5) * 2.5;
         g.fillStyle = rgba(242, 238, 232, 0.65);
         g.fillRect(-mw * 0.55, mY + cDip - cG * 0.3 + tremor, mw * 1.1, cG);
       }

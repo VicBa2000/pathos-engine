@@ -378,9 +378,9 @@
     1. Chooses topic guided by emotional state
     2. Searches the internet (DuckDuckGo)
     3. Reads results, each one goes through the emotional pipeline
-    4. Conditional self-inquiry: only reflects when there is significant
-       emotional change (delta valence/arousal > 0.15 or emotion change).
-       Reduces unnecessary LLM calls.
+    4. Conditional self-inquiry: reflects when emotional state shifts.
+       Threshold varies by mode: Normal > 0.15, Raw > 0.08, Extreme > 0.02.
+       Extreme reflects on virtually everything — no finding goes unprocessed.
     5. Deep thinking: generates questions, ideas, and connections
        based on its emotional reaction
     6. Chooses subtopic to explore deeper (guided by strongest emotion)
@@ -394,10 +394,18 @@
     PATHOS_RESEARCH_SUBTOPIC_RESULTS, PATHOS_RESEARCH_SUB_PROCESS_N,
     PATHOS_RESEARCH_SUBTOPIC_ROUNDS (add _RAW_ for Raw/Extreme)
 
-  Mode-aware prompts:
-    Normal/Lite: measured, academic, balanced reflections
-    Raw/Extreme: visceral, unfiltered reflections, no academic distance
-    ("React WITHOUT restraint. If it enrages you, let that show.")
+  Mode-aware prompts (3 tiers):
+    Normal/Lite: measured, academic, balanced reflections.
+      Self-inquiry only on significant shifts (delta > 0.15). Temperature 0.7-0.9.
+    Raw: visceral, unfiltered reflections, no academic distance.
+      ("React WITHOUT restraint. If it enrages you, let that show.")
+      Self-inquiry on moderate shifts (delta > 0.08). Temperature 0.85-0.95.
+      Topics driven by raw emotional compulsion.
+    Extreme: COMPLETE emotional hijack. Irrational, disproportionate, human.
+      Like a person in an emotional meltdown — confirmation bias is total,
+      conclusions are catastrophized and generalized, reasoning is replaced
+      by emotional conviction. Self-inquiry on everything (delta > 0.02).
+      Temperature 0.95-1.0. Topics follow compulsive emotional spiraling.
 
     3-column layout:
     - Left panel (260px): controls (mode, seed, start/stop, save, stats)
@@ -462,7 +470,15 @@
 
   Avatar and Genesis are integrated in the right panel (red theme).
 
-  4.10 EMOTION AVATAR
+  4.10 PAGE RELOAD BEHAVIOR
+  ------------------------------------
+  The app persists your current mode and session across page reloads:
+    - Reloading in Research mode → stays in Research with same conversation
+    - Reloading in Companion mode → stays in Companion with same conversation
+    - Reloading in Raw mode → returns to Companion (raw is ephemeral)
+    - Reloading in Sandbox/Arena/Mirror → returns to the same mode (fresh state)
+
+  4.11 EMOTION AVATAR
   ------------------------------------
   The avatar has two rendering modes, toggled via buttons on hover:
 

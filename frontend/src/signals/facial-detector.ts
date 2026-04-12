@@ -119,23 +119,61 @@ export class FacialDetector {
     // Load models first
     await loadModels();
 
-    // Request webcam
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 320 },
-        height: { ideal: 240 },
-        facingMode: "user",
-        frameRate: { ideal: 15 },
-      },
-      audio: false,
-    });
+    // Request webcam — retry once if the device is busy (common on Windows
+    // when the camera was recently released by another process).
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        this.stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 320 },
+            height: { ideal: 240 },
+            facingMode: "user",
+            frameRate: { ideal: 15 },
+          },
+          audio: false,
+        });
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        // Only retry on device-busy / abort errors — not on permission denied
+        if (
+          err instanceof DOMException &&
+          (err.name === "NotAllowedError" || err.name === "NotFoundError")
+        ) {
+          throw err;
+        }
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
+    }
+    if (lastErr) throw lastErr;
 
     // Create hidden video element for processing
     this.video = document.createElement("video");
-    this.video.srcObject = this.stream;
+    this.video.srcObject = this.stream!;
     this.video.setAttribute("playsinline", "true");
     this.video.muted = true;
-    await this.video.play();
+
+    // Wait for video to actually start with a timeout — on Windows the camera
+    // can hang indefinitely after getUserMedia succeeds but the device is stuck.
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error(
+            "Camera took too long to start. Try closing other apps using the camera, or restart the browser."
+          ));
+        }, 10000);
+        this.video!.onloadeddata = () => { clearTimeout(timeout); resolve(); };
+        this.video!.play().catch((err) => { clearTimeout(timeout); reject(err); });
+      });
+    } catch (err) {
+      // Release the camera if video playback failed
+      this.stop();
+      throw err;
+    }
 
     // Start detection loop
     this.running = true;
