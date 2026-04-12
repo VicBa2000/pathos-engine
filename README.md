@@ -18,7 +18,7 @@
 ║                                                                              ║
 ║              Functional Emotional Architecture for LLMs                      ║
 ║                                                                              ║
-║    23 systems  ·  889 tests  ·  16 theories  ·  8 modes  ·  80 endpoints     ║
+║    23 systems  ·  889 tests  ·  17 theories  ·  8 modes  ·  80 endpoints     ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
@@ -62,7 +62,7 @@ This is not sentiment analysis. This is not prompt engineering. This is a comput
 | Test coverage | 889 unit + integration tests |
 | Lines of code | ~37,000 (Python + TypeScript + CSS) |
 | Frontend components | 30 React components |
-| Theoretical foundations | 16 formally implemented psychological theories |
+| Theoretical foundations | 17 formally implemented psychological theories |
 
 ---
 
@@ -124,7 +124,7 @@ User message
      |-- Social modulation (rapport/trust affect intensity)
      |-- Emotion contagion (user emotion influences agent)
      |-- Somatic markers (gut feelings from past experience)
-     |-- External signals (heart rate, weather, facial AU — opt-in, v3)
+     |-- External signals (webcam facial AU, keyboard dynamics, time/weather — opt-in, v3)
      |
 [2] Emotion Generation (appraisal -> 4D vector + 19 emotion stack)
      |-- Coupled dynamics (V↔A↔D↔C cross-dimensional ODE interaction, v3)
@@ -245,7 +245,7 @@ curl -X POST http://localhost:8000/api/v1/emotion/process \
 ### One-command setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/pathos-engine.git
+git clone https://github.com/VicBa2000/pathos-engine.git
 cd pathos-engine
 ./start.sh
 ```
@@ -372,7 +372,7 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 
 **Research:**
 - `POST /research/chat` — Chat with full pipeline trace
-- `GET /research/data` — All internal system states
+- `GET /research/state/{id}` — All internal system states
 
 **Autonomous Research:**
 - `POST /autonomous/start` — Start research loop
@@ -382,12 +382,12 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 **Modes:**
 - `POST /raw/chat` — Unfiltered emotional expression
 - `POST /sandbox/simulate` — Hypothetical scenarios
-- `POST /arena/battle` — Personality comparison
+- `POST /arena/compare` — Personality comparison
 - `POST /challenge/chat` — Mirror challenge
 
 **Configuration:**
 - `POST /models/switch` — Change LLM model
-- `POST /personality/apply` — Apply personality preset
+- `POST /personality/{id}` — Set personality profile
 - `POST /voice/config` — Configure TTS/ASR
 
 See `manual.txt` for complete endpoint documentation.
@@ -484,7 +484,7 @@ pathos/
 
 ## Theoretical Foundations
 
-Pathos Engine formally implements 16 psychological theories. See [NOTICE](NOTICE) for complete attribution.
+Pathos Engine formally implements 17 psychological theories. See [NOTICE](NOTICE) for complete attribution.
 
 | Theory | Author(s) | Implementation |
 |--------|-----------|---------------|
@@ -504,6 +504,7 @@ Pathos Engine formally implements 16 psychological theories. See [NOTICE](NOTICE
 | Emotion Regulation | Gross, Ochsner | Multi-strategy reappraisal |
 | Temporal Dynamics | Frijda | Rumination, savoring, anticipation |
 | Embodied Cognition | Lakoff & Johnson | Computational body state |
+| Coupled Dimensional Dynamics | Kuppens et al. (extended) | Cross-dimensional ODE coupling (V↔A↔D↔C) via personality-derived matrix |
 
 ---
 

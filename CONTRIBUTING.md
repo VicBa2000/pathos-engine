@@ -55,7 +55,7 @@ api_routes.py        Emotion API as a Service — standalone REST endpoints (/ap
 config.py            Pydantic settings — all configurable via env vars.
 engine/              Emotional processing modules. Each system = 1 file.
   emotion_processor.py   Standalone pipeline (runs without LLM).
-  external_signals.py    Real-world signal fusion (heart rate, weather, etc.).
+  external_signals.py    Real-world signal fusion (webcam, keyboard, time, weather).
 models/              Pydantic data models (immutable state objects).
   coupling.py            Cross-dimensional ODE coupling matrix.
   emotion_api.py         Emotion API request/response schemas.

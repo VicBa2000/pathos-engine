@@ -1296,7 +1296,7 @@ Run one: python -m pytest tests/test_asr.py -v
   v3 (Coupling + API + Signals) - COMPLETE
     Coupled Dimensional Dynamics (cross-dimensional ODE from Big Five)
     Emotion API as a Service (7 REST endpoints, standalone processor)
-    External Stimulus Integration (8 signal sources, frontend config panel)
+    External Stimulus Integration (4 signal sources, frontend config panel)
     203 new tests, 889 total
 
   PENDING:
