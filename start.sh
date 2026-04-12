@@ -20,7 +20,7 @@ dim()   { echo -e "${DIM}$1${NC}"; }
 
 echo ""
 echo -e "${BOLD}${CYAN}  ╔═══════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${CYAN}  ║         PATHOS ENGINE v3 — Setup          ║${NC}"
+echo -e "${BOLD}${CYAN}  ║      PATHOS ENGINE v3 + ARK — Setup        ║${NC}"
 echo -e "${BOLD}${CYAN}  ║   Emotional Architecture for LLMs         ║${NC}"
 echo -e "${BOLD}${CYAN}  ╚═══════════════════════════════════════════╝${NC}"
 echo ""
