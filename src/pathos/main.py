@@ -4759,6 +4759,51 @@ class ModelInfo(BaseModel):
     name: str
     size: str
     provider: str
+    steering_compatible: bool = False
+    vectors_cached: bool = False
+
+
+def _get_gguf_supported_archs() -> set[str]:
+    """Get the set of architectures that transformers can load from GGUF."""
+    try:
+        from transformers.modeling_gguf_pytorch_utils import GGUF_SUPPORTED_ARCHITECTURES
+        return set(GGUF_SUPPORTED_ARCHITECTURES)
+    except ImportError:
+        return set()
+
+
+_GGUF_ARCHS = _get_gguf_supported_archs()
+
+# Map Ollama model name prefixes to GGUF architecture names
+_MODEL_TO_ARCH: dict[str, str] = {
+    "llama": "llama",
+    "codellama": "llama",
+    "mistral": "mistral",
+    "mixtral": "mistral",
+    "qwen2": "qwen2",
+    "qwen2.5": "qwen2",
+    "phi3": "phi3",
+    "phi": "phi3",
+    "bloom": "bloom",
+    "falcon": "falcon7b",
+    "stablelm": "stablelm",
+    "starcoder": "starcoder2",
+}
+
+
+def _check_steering_compatible(model_name: str) -> bool:
+    """Check if an Ollama model can be loaded via TransformersProvider.
+
+    Matches the model name prefix against architectures that the installed
+    version of transformers can load from GGUF files."""
+    if not _GGUF_ARCHS:
+        return False
+    base = model_name.split(":")[0].lower()
+    # Try longest prefix match first
+    for prefix in sorted(_MODEL_TO_ARCH, key=len, reverse=True):
+        if base.startswith(prefix):
+            return _MODEL_TO_ARCH[prefix] in _GGUF_ARCHS
+    return False
 
 
 class SwitchModelRequest(BaseModel):
@@ -4798,10 +4843,13 @@ async def list_models(session_id: str = "default") -> list[ModelInfo]:
                     size_str = f"{size_bytes / 1_000_000_000:.1f}GB"
                 else:
                     size_str = f"{size_bytes / 1_000_000:.0f}MB"
+                compatible = _check_steering_compatible(m["name"])
                 models.append(ModelInfo(
                     name=m["name"],
                     size=size_str,
                     provider="ollama",
+                    steering_compatible=compatible,
+                    vectors_cached=compatible and steering_engine.has_cached_vectors(m["name"]),
                 ))
     except Exception:
         pass  # Ollama not available
@@ -4833,10 +4881,11 @@ async def switch_model(req: SwitchModelRequest) -> dict[str, Any]:
     global llm_provider
 
     async with _switch_model_lock:
-        if llm_provider is not None and hasattr(llm_provider, "close"):
-            await llm_provider.close()
+        previous_provider = llm_provider
 
         if req.provider == "ollama":
+            if previous_provider is not None and hasattr(previous_provider, "close"):
+                await previous_provider.close()
             llm_provider = OllamaProvider(
                 base_url=settings.ollama_base_url,
                 model=req.model,
@@ -4844,17 +4893,42 @@ async def switch_model(req: SwitchModelRequest) -> dict[str, Any]:
             )
         elif req.provider == "transformers":
             from pathos.llm.transformers_provider import TransformersProvider
-            llm_provider = TransformersProvider(
+            new_provider = TransformersProvider(
                 model_id=req.model,
                 device_map=settings.transformers_device_map,
                 embed_model_url=settings.ollama_base_url,
                 embed_model=settings.ollama_embed_model,
                 adapter_path=settings.transformers_adapter_path or None,
             )
+            # Eagerly load to catch errors (unsupported arch, missing deps, OOM)
+            try:
+                new_provider._ensure_loaded()
+            except Exception as e:
+                logger.error("TransformersProvider failed for '%s': %s", req.model, e)
+                # Fallback: keep previous provider or create Ollama fallback
+                if previous_provider is not None:
+                    llm_provider = previous_provider
+                else:
+                    llm_provider = OllamaProvider(
+                        base_url=settings.ollama_base_url,
+                        model=req.model,
+                        embed_model=settings.ollama_embed_model,
+                    )
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Steering mode not available for '{req.model}': {e}. "
+                           f"Falling back to Ollama.",
+                )
+            # Success — close previous provider and use new one
+            if previous_provider is not None and hasattr(previous_provider, "close"):
+                await previous_provider.close()
+            llm_provider = new_provider
             # Auto-load steering vectors for the new model
             if steering_engine.load_vectors(req.model):
                 logger.info("Steering vectors loaded for '%s'", req.model)
         elif req.provider == "claude":
+            if previous_provider is not None and hasattr(previous_provider, "close"):
+                await previous_provider.close()
             # Legacy: use settings key
             if not settings.anthropic_api_key:
                 raise HTTPException(status_code=400, detail="Anthropic API key not configured")
@@ -4865,6 +4939,8 @@ async def switch_model(req: SwitchModelRequest) -> dict[str, Any]:
                 embed_model=settings.ollama_embed_model,
             )
         else:
+            if previous_provider is not None and hasattr(previous_provider, "close"):
+                await previous_provider.close()
             # Cloud provider from session config
             session = state_manager.get_session(req.session_id)
             cloud_cfg = session.cloud_providers.get(req.provider)
@@ -4921,6 +4997,61 @@ async def switch_model(req: SwitchModelRequest) -> dict[str, Any]:
             ),
         },
     }
+
+
+# --- Steering Vector Extraction ---
+
+_extraction_status: dict[str, dict[str, Any]] = {}
+
+
+class SteeringExtractRequest(BaseModel):
+    model: str
+    device: str = "auto"
+
+
+@app.post("/models/steering/extract")
+async def extract_steering_vectors(req: SteeringExtractRequest) -> dict[str, Any]:
+    """Start steering vector extraction for a model.
+
+    This is a blocking operation (2-5 min GPU, 10-30 min CPU).
+    Returns extraction results on completion.
+    """
+    model_name = req.model
+
+    # Check if already cached
+    if steering_engine.has_cached_vectors(model_name):
+        return {"status": "already_cached", "model": model_name}
+
+    # Check compatibility
+    if not _check_steering_compatible(model_name):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{model_name}' architecture not supported for steering",
+        )
+
+    # Check if extraction is already running
+    if model_name in _extraction_status and _extraction_status[model_name].get("status") == "running":
+        return {"status": "running", "model": model_name}
+
+    _extraction_status[model_name] = {"status": "running"}
+
+    try:
+        from pathos.engine.steering_extract import extract_and_cache
+        result = extract_and_cache(model_name, device=req.device)
+        _extraction_status[model_name] = {"status": "done", **result}
+        return {"status": "done", "model": model_name, **result}
+    except Exception as e:
+        logger.error("Steering extraction failed for '%s': %s", model_name, e)
+        _extraction_status[model_name] = {"status": "error", "error": str(e)}
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {e}")
+
+
+@app.get("/models/steering/status/{model}")
+async def steering_extract_status(model: str) -> dict[str, Any]:
+    """Check extraction status for a model."""
+    if steering_engine.has_cached_vectors(model):
+        return {"status": "cached", "model": model}
+    return _extraction_status.get(model, {"status": "not_started", "model": model})
 
 
 # --- Model Management: Featured, Pull, Search, Delete, HuggingFace, Claude Key ---

@@ -18,7 +18,7 @@
 ║                                                                              ║
 ║              Functional Emotional Architecture for LLMs                      ║
 ║                                                                              ║
-║    35 systems  · 1358 tests  ·  20 theories  ·  8 modes  ·  82 endpoints     ║
+║    35 systems  · 1358 tests  ·  20 theories  ·  8 modes  ·  84 endpoints     ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
@@ -59,7 +59,7 @@ This is not sentiment analysis. This is not prompt engineering. This is a comput
 | LLM modification channels | 4 (steering vectors, sampling, attention, prefix) |
 | Personality parameters | 8 (Big Five + 3 temperament) with 17+ derived traits |
 | Interaction modes | 8 (Companion, Research, Calibration, Sandbox, Arena, Mirror, Auto-Research, Raw) |
-| API endpoints | 82 (75 core + 7 Emotion API as a Service) |
+| API endpoints | 84 (77 core + 7 Emotion API as a Service) |
 | Test coverage | 1358 unit + integration tests |
 | Lines of code | ~42,000 (Python + TypeScript + CSS) |
 | Frontend components | 30 React components |
@@ -126,7 +126,7 @@ Not just prompt injection. These systems modify the LLM's internal processing:
 | **Conditioning Tokens** | Trained tokens | Special tokens (`<V+3><A-1>`) learned via QLoRA fine-tuning |
 | **Emotional Adapter** | LoRA weights | QLoRA adapter that conditions response patterns on emotional state |
 
-**Dual-path**: local models get full steering + sampling + attention. Cloud APIs degrade gracefully to prompt injection + temperature.
+**Dual-path**: local models get full steering + sampling + attention via Ollama/Steering toggle in the Model Manager (compatible architectures: llama, qwen2/2.5, mistral, phi3, starcoder2). Cloud APIs degrade gracefully to prompt injection + temperature.
 
 ---
 
@@ -398,7 +398,7 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 
 ## API Overview
 
-82 endpoints organized by function. Full interactive documentation at `/docs` when running.
+84 endpoints organized by function. Full interactive documentation at `/docs` when running.
 
 **Core:**
 - `POST /chat` — Main conversation (full pipeline)
@@ -421,7 +421,8 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 - `POST /challenge/chat` — Mirror challenge
 
 **Configuration:**
-- `POST /models/switch` — Change LLM model
+- `POST /models/switch` — Change LLM model (Ollama, Transformers, Claude, cloud)
+- `POST /models/steering/extract` — Extract steering vectors for a model
 - `POST /personality/{id}` — Set personality profile
 - `POST /voice/config` — Configure TTS/ASR
 
@@ -469,7 +470,7 @@ cd frontend && npx vite build
 ```
 pathos/
   src/pathos/
-    main.py                    # FastAPI app, 75 core endpoints, 3 pipeline variants
+    main.py                    # FastAPI app, 77 core endpoints, 3 pipeline variants
     api_routes.py              # Emotion API as a Service (7 endpoints under /api/v1/)
     config.py                  # Pydantic settings (env vars)
     engine/
@@ -510,7 +511,7 @@ pathos/
       interoception.py         # Body state feedback into emotional state
       steering_extract.py      # CLI for offline steering vector extraction
     llm/
-      transformers_provider.py # Direct model access (HF/GGUF/local, steering-ready)
+      transformers_provider.py # Direct model access (HF safetensors, steering-ready)
     training/                  # QLoRA fine-tuning + dataset generation
     steering_data/             # Contrastive pairs + cached steering vectors
     sampling_data/             # Emotional + attention vocabulary (6+7 categories)
@@ -520,7 +521,7 @@ pathos/
   frontend/src/
     App.tsx                    # Main app (8 modes, state management)
     components/                # 30 React components (incl. PainterlyFace, RealisticFace, SignalsConfigPanel)
-    api/client.ts              # API client (82 endpoints + SSE)
+    api/client.ts              # API client (84 endpoints + SSE)
     types/emotion.ts           # TypeScript types matching backend schemas
     signals/                   # External signal detectors (facial-detector.ts, providers.ts)
     lib/                       # Shared utilities (perlin, colorUtils, faceParams)

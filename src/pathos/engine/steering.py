@@ -455,6 +455,12 @@ class EmotionalSteeringEngine:
     def available_layers(self) -> set[int]:
         return self._cached.available_layers if self._cached else set()
 
+    def has_cached_vectors(self, model_id: str) -> bool:
+        """Check if cached steering vectors exist on disk for a model."""
+        safe_id = model_id.replace("/", "_").replace(":", "_").replace("\\", "_")
+        path = self._cache_dir / f"{safe_id}.npz"
+        return path.exists()
+
     def load_vectors(self, model_id: str) -> bool:
         """Attempt to load cached vectors for a model.
 

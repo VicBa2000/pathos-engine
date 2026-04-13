@@ -367,7 +367,59 @@ print('  \033[0;32m[OK]\033[0m Whisper model cached')
 fi
 
 # ==========================================================================
-# 5. Frontend dependencies
+# 5. Steering / TransformersProvider dependencies (optional — direct LLM modification)
+# ==========================================================================
+echo ""
+echo -e "${CYAN}--- Steering dependencies (optional) ---${NC}"
+
+if $HAS_TORCH; then
+  HAS_STEERING_DEPS=true
+
+  # gguf (required for loading GGUF models via TransformersProvider)
+  if ! $PYTHON -c "import gguf" 2>/dev/null; then
+    warn "Installing gguf (required for Steering mode with GGUF models)..."
+    if $HAS_UV; then
+      uv pip install "gguf>=0.10.0" --python .venv 2>&1 | tail -3
+    else
+      $PYTHON -m pip install "gguf>=0.10.0" -q 2>&1 | tail -3
+    fi
+    if $PYTHON -c "import gguf" 2>/dev/null; then
+      info "gguf installed"
+    else
+      HAS_STEERING_DEPS=false
+      warn "gguf installation failed."
+    fi
+  else
+    info "gguf ready"
+  fi
+
+  # accelerate (required for device_map="auto" in transformers)
+  if ! $PYTHON -c "import accelerate" 2>/dev/null; then
+    warn "Installing accelerate (required for TransformersProvider)..."
+    if $HAS_UV; then
+      uv pip install "accelerate>=0.25.0" --python .venv 2>&1 | tail -3
+    else
+      $PYTHON -m pip install "accelerate>=0.25.0" -q 2>&1 | tail -3
+    fi
+    if $PYTHON -c "import accelerate" 2>/dev/null; then
+      info "accelerate installed"
+    else
+      HAS_STEERING_DEPS=false
+      warn "accelerate installation failed."
+    fi
+  else
+    info "accelerate ready"
+  fi
+
+  if $HAS_STEERING_DEPS; then
+    info "Steering mode available (select 'Steering' in Model Manager)"
+  fi
+else
+  warn "PyTorch not available — Steering mode disabled (needs torch + gguf + accelerate)"
+fi
+
+# ==========================================================================
+# 6. Frontend dependencies
 # ==========================================================================
 echo ""
 echo -e "${CYAN}--- Frontend dependencies ---${NC}"
@@ -422,7 +474,7 @@ if [ ${#OLLAMA_PULL_PIDS[@]} -gt 0 ]; then
 fi
 
 # ==========================================================================
-# 6. Start services
+# 7. Start services
 # ==========================================================================
 echo ""
 echo -e "${GREEN}${BOLD}  ╔═══════════════════════════════════════════╗${NC}"

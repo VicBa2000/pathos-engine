@@ -76,7 +76,7 @@ conscious sense. It is transparent about its functional nature.
 
 pathos/
 ├── src/pathos/                   # Python Backend
-│   ├── main.py                   # FastAPI app, 75 core endpoints, pipeline
+│   ├── main.py                   # FastAPI app, 77 core endpoints, pipeline
 │   ├── api_routes.py             # Emotion API as a Service (7 endpoints)
 │   ├── config.py                 # Settings (env vars, models)
 │   ├── engine/                   # Emotional logic (36 modules)
@@ -690,11 +690,30 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
       - message: human-readable summary of active modification mode
     Frontend shows an ARK notice banner (green for direct, yellow for injection)
 
-  UI: Local tab shows two buttons per model:
-    [Ollama]   — load via Ollama HTTP (fast, prompt injection mode)
-    [Steering] — load via TransformersProvider (steering vectors + attention
-                 + prefix — uses more VRAM)
-    Active model/provider shows green highlight.
+    When provider is "transformers", the model is loaded eagerly. If loading
+    fails (unsupported architecture, OOM), returns 400 and preserves previous
+    provider. TransformersProvider loads HuggingFace safetensors (not Ollama
+    GGUF) to avoid dequantization bugs.
+
+  UI: Local tab shows Ollama/Steering toggle per model:
+    Toggle left (green)  = Ollama HTTP (prompt injection, fast)
+    Toggle right (purple) = TransformersProvider (steering + attention + prefix)
+    Toggle disabled (grey) = architecture not compatible with steering
+    Compatible: llama, qwen2/2.5, mistral, phi3, starcoder2
+    Not compatible: qwen3, gemma (GGUF arch not in transformers)
+    First Steering activation auto-downloads HF safetensors (~4GB, cached)
+    and extracts steering vectors. Loading shows animated indicator.
+    GET /models returns steering_compatible and vectors_cached per model.
+
+  POST /models/steering/extract
+    Body: { "model": "qwen2.5:3b", "device": "auto" }
+    Extracts steering vectors for a model (2-5 min GPU, 10-30 min CPU).
+    Uses Ollama GGUF on CPU for extraction (avoids re-downloading).
+    Returns: { status, model, total_time_s, ... }
+    Auto-triggered after model download for compatible models.
+
+  GET  /models/steering/status/{model}
+    Returns extraction status: cached, running, not_started, or error.
 
   GET  /models/featured
     Returns curated catalog of ~25 recommended models with VRAM estimates
@@ -906,7 +925,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   UI ISOLATION (Raw Mode transforms the entire header):
     - Mode tabs (Chat, Research, etc.) replaced by "RAW MODE" badge + EXIT button
     - EXIT: destroys session, returns to Companion, reloads auto-load save
-    - Model Selector: only shows "Local" tab with Ollama/Steering dual buttons
+    - Model Selector: only shows "Local" tab with Ollama/Steering toggle
       (Featured, Search, Cloud, HF hidden)
     - Agent Setup: hidden
     - Settings: only Engine (Advanced + Lite) and Voice. No Display, no Forecasting,
@@ -1126,7 +1145,7 @@ LEVEL 2 — REPRESENTATION ENGINEERING (local models only):
     using contrastive pairs (mean(positive) - mean(negative)). Applied
     via register_forward_hook() during inference. Quadratic intensity
     scaling (intensity² — weak emotions don't steer).
-    Extraction: python -m pathos.engine.steering_extract --model qwen3:4b
+    Extraction: auto via UI toggle, or CLI: python -m pathos.engine.steering_extract --model qwen2.5:3b
     Module: src/pathos/engine/steering.py
 
   Multi-Layer Steering:
@@ -1137,10 +1156,13 @@ LEVEL 2 — REPRESENTATION ENGINEERING (local models only):
     Per-layer scaling: early=0.70, mid=1.00, late=0.85.
 
   TransformersProvider:
-    Direct model loading via HuggingFace transformers. Supports HF model
-    IDs, Ollama GGUF files, local paths. device_map="auto" for GPU+CPU
-    split. Exposes steerable_model for hook registration. Loads QLoRA
-    adapters if configured.
+    Direct model loading via HuggingFace transformers. Loads HF safetensors
+    (not Ollama GGUF — GGUF dequantization has bugs in transformers 4.46-4.48).
+    Tries GPU first, falls back to CPU on OOM. Single-device loading only
+    (device_map="auto" causes rotary embedding mismatches).
+    Exposes steerable_model for hook registration. Loads QLoRA adapters if
+    configured. Requires transformers>=4.48.0.
+    Compatible architectures: llama, qwen2/2.5, mistral, phi3, starcoder2.
     Module: src/pathos/llm/transformers_provider.py
 
 LEVEL 3 — EMOTIONAL SAMPLING:

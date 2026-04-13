@@ -72,20 +72,24 @@ def extract_and_cache(
     t_start = time.perf_counter()
 
     # --- Resolve model path ---
+    # Use Ollama's local GGUF when available (no extra download).
+    # GGUF + device_map="auto" causes a bug in transformers 4.46.x, so
+    # GGUF models are always loaded on CPU for extraction (one-time cost).
     load_path = model_id
     gguf_file: str | None = None
     source = "huggingface"
+    force_cpu = False
 
-    # Check if it's an Ollama model name
     if ":" in model_id and "/" not in model_id:
+        # Ollama model name — try local GGUF first (avoids re-downloading)
         gguf_path = find_ollama_gguf(model_id)
         if gguf_path is not None:
             load_path = str(gguf_path.parent)
             gguf_file = gguf_path.name
             source = "ollama_gguf"
-            logger.info("Found Ollama GGUF: %s", gguf_path)
+            force_cpu = True  # GGUF + device_map="auto" crashes in transformers 4.46.x
+            logger.info("Found Ollama GGUF: %s (loading on CPU to avoid transformers bug)", gguf_path)
         else:
-            # Try mapping to HuggingFace ID
             hf_id = _ollama_to_hf_id(model_id)
             if hf_id:
                 load_path = hf_id
@@ -99,16 +103,16 @@ def extract_and_cache(
         source = "local_path"
 
     # --- Determine dtype and device ---
-    if device == "auto":
+    if force_cpu or device == "cpu":
+        device_map = "cpu"
+        dtype = torch.float32
+    elif device == "auto":
         if torch.cuda.is_available():
-            device_map = "auto"  # Split GPU/CPU as needed
+            device_map = "auto"
             dtype = torch.float16
         else:
             device_map = "cpu"
             dtype = torch.float32
-    elif device == "cpu":
-        device_map = "cpu"
-        dtype = torch.float32
     else:
         device_map = device
         dtype = torch.float16
