@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from pathos.engine.dynamics import EmotionDynamics
+from pathos.engine.interoception import InteroceptiveState
+from pathos.engine.steering import SteeringMomentum
 from pathos.models.coupling import CouplingMatrix, coupling_from_personality
 from pathos.engine.narrative import NarrativeTracker
 from pathos.engine.emotional_schemas import SchemaStore, EmotionalSchema
@@ -75,6 +77,18 @@ class SessionState:
         self.advanced_mode: bool = True  # Advanced mode: activa/desactiva sistemas emocionales avanzados
         self.raw_mode: bool = False  # Raw mode: unfiltered emotional expression (censorless)
         self.extreme_mode: bool = False  # Extreme: bypass regulation/reappraisal/immune + amplify
+        self.self_appraisal_enabled: bool = True  # Self-appraisal: evaluate own response against values
+        self.world_model_enabled: bool = True  # World model: predict emotional impact before sending
+        self.interoceptive_state: InteroceptiveState = InteroceptiveState()  # Body-state duration tracking
+        self.direct_mode: bool = True  # Direct LLM modification (steering/prefix/attention) vs prompt injection only
+        self.steering_enabled: bool = True  # Steering vectors: modify LLM hidden states (local models only)
+        self.steering_momentum_enabled: bool = True  # Steering momentum: temporal inertia across turns
+        self.steering_momentum: SteeringMomentum = SteeringMomentum()  # Momentum state per session
+        self.emotional_prefix_enabled: bool = True  # Emotional prefix: inject synthetic emotional tokens at embedding layer (local models only)
+        self.conditioning_tokens_enabled: bool = False  # Trained conditioning tokens: requires QLoRA adapter (5.3b, heavy GPU)
+        self.emotional_adapter_enabled: bool = False  # QLoRA emotional adapter: requires trained adapter (5.2b, heavy GPU)
+        self.emotional_sampler_enabled: bool = True  # Emotional sampler: modify sampling params from state
+        self.emotional_attention_enabled: bool = True  # Attention modulation: bias attention weights by emotion (local models only)
         # Cloud providers: {id: {preset, label, api_key, base_url, model, models[]}}
         self.cloud_providers: dict[str, dict[str, Any]] = {}
         self.narrative_tracker: "NarrativeTracker" = self._create_narrative_tracker()

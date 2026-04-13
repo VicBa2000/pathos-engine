@@ -31,6 +31,12 @@ class ClaudeProvider(LLMProvider):
         messages: list[dict[str, str]],
         temperature: float | None = None,
         think: bool = True,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        repetition_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+        logit_bias: dict[str, float] | None = None,
     ) -> str:
         kwargs: dict = {
             "model": self.model,
@@ -40,6 +46,11 @@ class ClaudeProvider(LLMProvider):
         }
         if temperature is not None:
             kwargs["temperature"] = temperature
+        if top_p is not None:
+            kwargs["top_p"] = top_p
+        if top_k is not None:
+            kwargs["top_k"] = top_k
+        # repetition_penalty, presence_penalty, frequency_penalty not supported by Claude API
         response = await self._client.messages.create(**kwargs)
         if not response.content:
             raise RuntimeError("Claude returned empty response content")

@@ -125,6 +125,73 @@ EMOTION_EFFECTS: dict[PrimaryEmotion, str] = {
 }
 
 
+def generate_blended_effects(
+    stack: dict[str, float],
+    effects_dict: dict[PrimaryEmotion, str],
+    max_emotions: int = 4,
+    min_activation: float = 0.10,
+) -> str:
+    """Genera un blend composicional ponderado del emotional stack.
+
+    En lugar de seleccionar UN efecto para la emoción primaria, combina
+    las top-N emociones activas con sus pesos. Produce prompts como:
+    "[55%] Reflexividad profunda + [25%] Gratitud genuina + [15%] Esperanza cautelosa"
+
+    Args:
+        stack: emotional_stack dict {emotion_name: activation}
+        effects_dict: EMOTION_EFFECTS or RAW_EMOTION_EFFECTS
+        max_emotions: máximo de emociones a incluir
+        min_activation: activación mínima para incluir una emoción
+
+    Returns:
+        Texto con blend composicional, o string vacío si stack está vacío.
+    """
+    if not stack:
+        return ""
+
+    # Si el stack es el default sin computar ({"neutral": 1.0} y nada más),
+    # retornar vacío para que el caller use el fallback con primary_emotion
+    if len(stack) == 1 and stack.get("neutral", 0) >= 0.99:
+        return ""
+
+    # Filtrar y ordenar por activación descendente
+    active = [
+        (name, activation)
+        for name, activation in stack.items()
+        if activation >= min_activation
+    ]
+    if not active:
+        return ""
+
+    active.sort(key=lambda x: -x[1])
+    top = active[:max_emotions]
+
+    # Normalizar pesos al 100% entre las seleccionadas
+    total = sum(a for _, a in top)
+    if total <= 0:
+        return ""
+
+    lines: list[str] = []
+    for name, activation in top:
+        pct = activation / total
+        try:
+            emotion = PrimaryEmotion(name)
+        except ValueError:
+            continue
+        effect = effects_dict.get(emotion, "")
+        if effect:
+            lines.append(f"  [{pct:.0%}] {effect}")
+
+    if not lines:
+        return ""
+
+    if len(lines) == 1:
+        # Solo una emoción dominante — sin header de mezcla
+        return f"- Estado dominante: {lines[0].strip().lstrip('[').split(']', 1)[-1].strip()}"
+
+    return "- Tu estado emocional es una MEZCLA simultanea:\n" + "\n".join(lines)
+
+
 RAW_EMOTION_EFFECTS: dict[PrimaryEmotion, str] = {
     PrimaryEmotion.JOY: (
         "EUFORIA. No puedes contenerte. Ries, gritas de alegria, abrazas, "
@@ -255,11 +322,15 @@ def generate_raw_behavior_modifier(
     if gut_feeling:
         parts.append(f"  Instinto visceral: {gut_feeling}")
 
-    # Efecto emocional RAW (sin filtros)
+    # Efecto emocional RAW: blend composicional del stack o fallback a primaria
     parts.extend(["", "COMO TE SIENTES (expresalo ASI):"])
-    effect = RAW_EMOTION_EFFECTS.get(state.primary_emotion, "")
-    if effect:
-        parts.append(effect)
+    blended = generate_blended_effects(state.emotional_stack, RAW_EMOTION_EFFECTS)
+    if blended:
+        parts.append(blended)
+    else:
+        effect = RAW_EMOTION_EFFECTS.get(state.primary_emotion, "")
+        if effect:
+            parts.append(effect)
 
     # Intensidad escala la expresion
     if state.intensity > 0.8:
@@ -325,11 +396,15 @@ def generate_simple_behavior_modifier(state: EmotionalState) -> str:
         f"Estado: {state.primary_emotion.value} (intensidad: {state.intensity:.2f}){secondary_str}",
     ]
 
-    # Efecto de la emocion primaria (describe QUE siente)
+    # Efecto emocional: blend composicional del stack o fallback a primaria
     if state.intensity > 0.1:
-        effect = EMOTION_EFFECTS.get(state.primary_emotion, "")
-        if effect:
-            parts.append(effect)
+        blended = generate_blended_effects(state.emotional_stack, EMOTION_EFFECTS, max_emotions=2)
+        if blended:
+            parts.append(blended)
+        else:
+            effect = EMOTION_EFFECTS.get(state.primary_emotion, "")
+            if effect:
+                parts.append(effect)
 
     # Efectos de procesamiento clave (describe COMO afecta la comunicacion)
     effects: list[str] = []
@@ -519,11 +594,16 @@ def generate_behavior_modifier(
         for instruction in creativity.active_instructions:
             parts.append(f"  * {instruction}")
 
-    # Efecto de la emocion primaria
+    # Efecto emocional: blend composicional del stack o fallback a primaria
     if state.intensity > 0.1:
-        effect = EMOTION_EFFECTS.get(state.primary_emotion, "")
-        if effect:
-            parts.append(f"- Estado dominante: {effect}")
+        blended = generate_blended_effects(state.emotional_stack, EMOTION_EFFECTS)
+        if blended:
+            parts.append(blended)
+        else:
+            # Fallback: si stack vacío, usar emoción primaria
+            effect = EMOTION_EFFECTS.get(state.primary_emotion, "")
+            if effect:
+                parts.append(f"- Estado dominante: {effect}")
 
     # Self-Initiated Inquiry (reflexion espontanea)
     if self_inquiry:

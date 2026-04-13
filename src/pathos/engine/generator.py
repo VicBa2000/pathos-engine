@@ -47,15 +47,34 @@ def compute_arousal(appraisal: AppraisalVector) -> float:
 
 
 def compute_dominance(appraisal: AppraisalVector) -> float:
-    """Calcula dominance desde el appraisal."""
+    """Calcula dominance desde el appraisal (5 dimensiones de Scherer).
+
+    Integra coping (control, power, adjustability) y agency (fairness directional).
+    Fairness alta → empowerment (dominance sube).
+    Fairness baja → victimización (dominance baja).
+    """
     c = appraisal.coping
-    raw = c.control * 0.4 + c.power * 0.3 + abs(appraisal.agency.fairness) * 0.3
+    # Fairness directional: -1 (injusto) → 0, +1 (justo) → 1
+    fairness_01 = (appraisal.agency.fairness + 1) / 2
+    raw = (
+        c.control * 0.35
+        + c.power * 0.25
+        + fairness_01 * 0.25
+        + c.adjustability * 0.15
+    )
     return _clamp(raw, 0, 1)
 
 
 def compute_certainty(appraisal: AppraisalVector) -> float:
-    """Calcula certainty desde el appraisal."""
-    return _clamp(appraisal.coping.adjustability, 0, 1)
+    """Calcula certainty desde el appraisal (5 dimensiones de Scherer).
+
+    Integra coping.adjustability y norms.self_consistency.
+    Self-consistency alta → más certeza (coherente con quien soy).
+    Self-consistency baja → incertidumbre (contradicción identitaria).
+    """
+    self_con_01 = (appraisal.norms.self_consistency + 1) / 2  # -1..1 → 0..1
+    raw = appraisal.coping.adjustability * 0.6 + self_con_01 * 0.4
+    return _clamp(raw, 0, 1)
 
 
 # Prototipos emocionales: (valence, arousal, dominance, certainty)

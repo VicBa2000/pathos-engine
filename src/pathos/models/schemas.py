@@ -314,6 +314,74 @@ class PersonalityDetails(BaseModel):
     regulation_capacity_base: float
 
 
+class SelfAppraisalDetails(BaseModel):
+    """Detalles de la self-appraisal (evaluación secundaria de la propia respuesta)."""
+
+    applied: bool = False
+    value_alignment: float = 1.0
+    emotional_coherence: float = 1.0
+    predicted_self_valence: float = 0.0
+    should_regenerate: bool = False
+    did_regenerate: bool = False
+    reason: str = ""
+    adjustments: list[str] = []
+
+
+class SteeringDetails(BaseModel):
+    """Detalles del steering vector engine (Representation Engineering)."""
+
+    enabled: bool = False
+    status: str = "not_loaded"  # "not_loaded" | "ready" | "disabled"
+    model_id: str | None = None
+    dimensions: list[str] = []
+    layers: list[int] = []
+    layer_roles: dict[str, list[int]] = {}  # "early"/"mid"/"late" -> layer indices
+    multilayer: bool = True
+    total_vectors: int = 0
+    momentum_enabled: bool = False
+    momentum_factor: float = 0.0
+    momentum_turns_stored: int = 0
+
+
+class AttentionDetails(BaseModel):
+    """Detalles de la modulación de atención emocional."""
+
+    enabled: bool = False
+    status: str = "inactive"  # "active" | "inactive" | "disabled" | "provider_unsupported"
+    categories_active: dict[str, float] = {}
+    broadening_factor: float = 1.0
+    positions_biased: int = 0
+    layers_hooked: list[int] = []
+    words_biased: int = 0
+
+
+class EmotionalPrefixDetails(BaseModel):
+    """Detalles del emotional prefix (tokens sintéticos en capa de embedding)."""
+
+    enabled: bool = False
+    status: str = "inactive"  # "active" | "inactive" | "disabled" | "provider_unsupported"
+    num_tokens: int = 0
+    embedding_norm: float = 0.0
+    dominant_dimension: str = "neutral"
+    scale: float = 0.5
+
+
+class WorldModelDetails(BaseModel):
+    """Detalles del world model emocional (simulación predictiva pre-envío)."""
+
+    applied: bool = False
+    predicted_self_valence_shift: float = 0.0
+    predicted_self_effect: str = "neutral"
+    predicted_user_valence_shift: float = 0.0
+    predicted_user_effect: str = "neutral"
+    meta_reaction_effect: str = "neutral"
+    value_alignment: float = 1.0
+    emotional_risk: float = 0.0
+    should_modify: bool = False
+    did_modify: bool = False
+    reason: str = ""
+
+
 class CouplingDetails(BaseModel):
     """Detalles del acoplamiento dimensional (cross-dimensional ODE interaction)."""
 
@@ -355,6 +423,11 @@ class ResearchChatResponse(BaseModel):
     narrative: NarrativeDetails
     forecasting: ForecastingDetails
     coupling: CouplingDetails
+    self_appraisal: SelfAppraisalDetails
+    world_model: WorldModelDetails
+    steering: SteeringDetails
+    emotional_prefix: EmotionalPrefixDetails
+    attention: AttentionDetails
     voice: VoiceDetails
 
     # Results

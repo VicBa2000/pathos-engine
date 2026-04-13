@@ -19,7 +19,9 @@ export function ResearchPanel({ data }: Props) {
 
   const { appraisal, homeostasis, memory_amplification, mood_congruence, emotion_generation,
     needs, social, regulation, reappraisal, temporal, meta_emotion, schemas, personality,
-    contagion, somatic, creativity, immune, narrative, forecasting, coupling, voice, authenticity_metrics, emotional_state, emergent_emotions } = data;
+    contagion, somatic, creativity, immune, narrative, forecasting, coupling, voice,
+    self_appraisal, world_model, steering, emotional_prefix, attention,
+    authenticity_metrics, emotional_state, emergent_emotions } = data;
 
   return (
     <div className="research-panel">
@@ -297,6 +299,117 @@ export function ResearchPanel({ data }: Props) {
           <Row label="Primed" value={`${schemas.primed_emotion} (+${(schemas.priming_amplification * 100).toFixed(1)}%)`} />
         )}
       </Section>
+
+      {/* === ARK Rework Systems === */}
+
+      {/* Self-Appraisal */}
+      {self_appraisal && (
+        <Section title="Self-Appraisal (Lazarus)">
+          <StatusRow label="Applied" active={self_appraisal.applied}
+            detail={self_appraisal.applied
+              ? `alignment=${self_appraisal.value_alignment.toFixed(2)} coherence=${self_appraisal.emotional_coherence.toFixed(2)}`
+              : "Disabled"} />
+          {self_appraisal.applied && (
+            <>
+              <NeedBar label="Value Alignment" value={self_appraisal.value_alignment} />
+              <NeedBar label="Emotional Coherence" value={self_appraisal.emotional_coherence} />
+              <Row label="Predicted Self Valence" value={self_appraisal.predicted_self_valence.toFixed(3)} />
+              <StatusRow label="Regenerated" active={self_appraisal.did_regenerate}
+                detail={self_appraisal.did_regenerate ? self_appraisal.reason : undefined} />
+              {self_appraisal.adjustments.length > 0 && (
+                <Row label="Adjustments" value={self_appraisal.adjustments.join(", ")} />
+              )}
+            </>
+          )}
+        </Section>
+      )}
+
+      {/* World Model */}
+      {world_model && (
+        <Section title="World Model (Predictive)">
+          <StatusRow label="Applied" active={world_model.applied}
+            detail={world_model.applied
+              ? `risk=${(world_model.emotional_risk * 100).toFixed(0)}%`
+              : "Disabled"} />
+          {world_model.applied && (
+            <>
+              <Row label="Self Effect" value={`${world_model.predicted_self_effect} (${world_model.predicted_self_valence_shift >= 0 ? "+" : ""}${world_model.predicted_self_valence_shift.toFixed(3)})`} />
+              <Row label="User Effect" value={`${world_model.predicted_user_effect} (${world_model.predicted_user_valence_shift >= 0 ? "+" : ""}${world_model.predicted_user_valence_shift.toFixed(3)})`} />
+              <Row label="Meta-Reaction" value={world_model.meta_reaction_effect} />
+              <NeedBar label="Value Alignment" value={world_model.value_alignment} />
+              <MetricBar label="Emotional Risk" value={world_model.emotional_risk} />
+              {world_model.did_modify && (
+                <div className="research-breakthrough">WORLD MODEL MODIFIED RESPONSE</div>
+              )}
+              {world_model.reason && <Row label="Reason" value={world_model.reason} />}
+            </>
+          )}
+        </Section>
+      )}
+
+      {/* Steering Vectors */}
+      {steering && (
+        <Section title="Steering Vectors (RepEng)">
+          <StatusRow label="Status" active={steering.enabled && steering.status === "ready"}
+            detail={`${steering.status}${steering.model_id ? ` (${steering.model_id})` : ""}`} />
+          {steering.enabled && steering.status === "ready" && (
+            <>
+              <Row label="Vectors" value={`${steering.total_vectors} across ${steering.layers.length} layers`} />
+              <Row label="Dimensions" value={steering.dimensions.join(", ")} />
+              {steering.layer_roles && Object.keys(steering.layer_roles).length > 0 && (
+                <Row label="Layer Roles" value={Object.entries(steering.layer_roles).map(([role, layers]) => `${role}:[${layers.join(",")}]`).join(" ")} />
+              )}
+              {steering.momentum_enabled && (
+                <>
+                  <NeedBar label="Momentum" value={steering.momentum_factor} />
+                  <Row label="History" value={`${steering.momentum_turns_stored} turns stored`} />
+                </>
+              )}
+            </>
+          )}
+        </Section>
+      )}
+
+      {/* Emotional Prefix */}
+      {emotional_prefix && (
+        <Section title="Emotional Prefix (Embedding)">
+          <StatusRow label="Status" active={emotional_prefix.enabled && emotional_prefix.status === "active"}
+            detail={emotional_prefix.status} />
+          {emotional_prefix.status === "active" && (
+            <>
+              <Row label="Tokens" value={`${emotional_prefix.num_tokens} prefix tokens`} />
+              <Row label="Dominant" value={emotional_prefix.dominant_dimension} />
+              <Row label="Norm" value={emotional_prefix.embedding_norm.toFixed(4)} />
+              <Row label="Scale" value={emotional_prefix.scale.toFixed(2)} />
+            </>
+          )}
+        </Section>
+      )}
+
+      {/* Attention Modulation */}
+      {attention && (
+        <Section title="Attention Modulation">
+          <StatusRow label="Status" active={attention.enabled && attention.status === "active"}
+            detail={attention.status} />
+          {attention.status === "active" && (
+            <>
+              <Row label="Broadening" value={`${attention.broadening_factor.toFixed(2)}x ${attention.broadening_factor > 1 ? "(narrowing)" : attention.broadening_factor < 1 ? "(broadening)" : "(neutral)"}`} />
+              <Row label="Words Biased" value={String(attention.words_biased)} />
+              <Row label="Positions" value={String(attention.positions_biased)} />
+              {attention.layers_hooked.length > 0 && (
+                <Row label="Layers" value={attention.layers_hooked.join(", ")} />
+              )}
+              {Object.keys(attention.categories_active).length > 0 && (
+                <>
+                  {Object.entries(attention.categories_active).map(([cat, val]) => (
+                    <NeedBar key={cat} label={cat} value={Math.min(Math.abs(val), 1)} />
+                  ))}
+                </>
+              )}
+            </>
+          )}
+        </Section>
+      )}
 
       {/* Metrics */}
       <Section title="Authenticity Metrics">

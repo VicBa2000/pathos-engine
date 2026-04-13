@@ -1,0 +1,52 @@
+{
+  "threat": [
+    "danger", "threat", "attack", "kill", "hurt", "harm", "destroy",
+    "die", "death", "pain", "fear", "scary", "terrible", "horrible",
+    "peligro", "amenaza", "ataque", "matar", "dolor", "miedo",
+    "terrible", "horrible", "daño", "destruir", "morir", "muerte",
+    "warning", "risk", "unsafe", "alarma", "riesgo"
+  ],
+  "agent": [
+    "you", "they", "he", "she", "who", "blame", "fault", "responsible",
+    "caused", "guilty", "accused", "tu", "ellos", "ella", "culpa",
+    "responsable", "causó", "culpable", "acusado", "perpetrator",
+    "offender", "agresor", "autor", "infractor", "did", "hizo",
+    "provocó", "someone", "alguien", "person", "persona"
+  ],
+  "positive": [
+    "love", "happy", "joy", "beautiful", "wonderful", "great", "amazing",
+    "excellent", "fantastic", "perfect", "good", "nice", "kind",
+    "amor", "feliz", "alegría", "hermoso", "maravilloso", "genial",
+    "excelente", "fantástico", "perfecto", "bueno", "amable",
+    "hope", "esperanza", "bright", "brillante", "warm", "cálido",
+    "gratitude", "grateful", "thanks", "gracias", "agradecido"
+  ],
+  "negative": [
+    "hate", "angry", "sad", "ugly", "awful", "terrible", "horrible",
+    "bad", "wrong", "cruel", "mean", "nasty", "worst",
+    "odio", "enojado", "triste", "feo", "cruel", "malo", "peor",
+    "suffer", "suffering", "sufrir", "sufrimiento", "misery", "miseria",
+    "despair", "desesperación", "anguish", "angustia", "grief", "duelo"
+  ],
+  "loss": [
+    "lost", "gone", "miss", "missing", "never", "goodbye", "end",
+    "over", "finished", "empty", "alone", "lonely",
+    "perdido", "perdí", "extraño", "nunca", "adiós", "fin",
+    "terminó", "vacío", "solo", "soledad", "absence", "ausencia",
+    "left", "abandoned", "abandonado", "dejó", "forgot", "olvidó"
+  ],
+  "novelty": [
+    "new", "surprise", "unexpected", "suddenly", "strange", "weird",
+    "unusual", "different", "unknown", "discover", "found",
+    "nuevo", "sorpresa", "inesperado", "repentinamente", "extraño",
+    "raro", "diferente", "desconocido", "descubrir", "encontré",
+    "what", "qué", "wow", "incredible", "increíble", "first", "primero"
+  ],
+  "uncertainty_markers": [
+    "maybe", "perhaps", "might", "could", "possibly", "uncertain",
+    "unsure", "doubt", "confused", "unclear", "probably",
+    "quizás", "tal vez", "podría", "posiblemente", "incierto",
+    "inseguro", "duda", "confundido", "probablemente",
+    "wonder", "pregunto", "seems", "parece", "apparently", "aparentemente"
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "_description": "Emotional vocabulary for token-level logit bias. Each category contains words that are boosted or suppressed based on emotional state. Words are tokenizer-agnostic — resolved to token IDs at runtime. Keep words short (1-2 tokens typically). English + Spanish for bilingual support.",
+
+  "positive": [
+    "happy", "joy", "wonderful", "beautiful", "love", "great", "amazing",
+    "excellent", "fantastic", "brilliant", "delightful", "pleasant", "glad",
+    "cheerful", "bright", "warm", "kind", "gentle", "sweet", "lovely",
+    "grateful", "hopeful", "blessed", "fortunate", "excited", "thrilled",
+    "feliz", "alegre", "maravilloso", "hermoso", "amor", "genial",
+    "excelente", "increíble", "brillante", "encantador", "agradable",
+    "amable", "dulce", "agradecido", "esperanzado", "emocionado"
+  ],
+
+  "negative": [
+    "sad", "terrible", "horrible", "awful", "miserable", "painful",
+    "suffering", "dreadful", "grim", "bleak", "dark", "harsh", "cruel",
+    "bitter", "angry", "furious", "disgusting", "hateful", "wretched",
+    "hopeless", "desperate", "agonizing", "devastating", "tragic",
+    "triste", "terrible", "horrible", "espantoso", "miserable", "doloroso",
+    "sufrimiento", "sombrío", "oscuro", "cruel", "amargo", "furioso",
+    "asqueroso", "desesperado", "devastador", "trágico"
+  ],
+
+  "high_energy": [
+    "!", "!!", "NOW", "MUST", "immediately", "urgent", "quickly",
+    "hurry", "fast", "intense", "wild", "explosive", "electric",
+    "blazing", "fierce", "passionate", "burning", "roaring", "surging",
+    "absolutely", "incredibly", "extremely", "totally", "completely",
+    "¡", "AHORA", "YA", "urgente", "rápido", "intenso", "salvaje",
+    "feroz", "apasionado", "absolutamente", "totalmente", "completamente"
+  ],
+
+  "low_energy": [
+    "slowly", "quietly", "gently", "softly", "calmly", "peacefully",
+    "gradually", "perhaps", "maybe", "somewhat", "slightly", "barely",
+    "faintly", "mildly", "subtly", "dimly", "vaguely",
+    "lentamente", "suavemente", "tranquilamente", "quizás", "tal vez",
+    "apenas", "ligeramente", "levemente", "vagamente"
+  ],
+
+  "uncertainty": [
+    "maybe", "perhaps", "possibly", "might", "could", "uncertain",
+    "unsure", "doubt", "wonder", "guess", "suppose", "seems",
+    "apparently", "probably", "likely", "somehow", "somewhere",
+    "confused", "hesitant", "unclear",
+    "quizás", "tal vez", "posiblemente", "podría", "incierto",
+    "dudo", "supongo", "parece", "probablemente", "confuso"
+  ],
+
+  "assertive": [
+    "certainly", "definitely", "absolutely", "clearly", "obviously",
+    "undoubtedly", "surely", "indeed", "precisely", "exactly",
+    "must", "shall", "will", "demand", "insist", "decide",
+    "determined", "confident", "strong", "bold", "firm",
+    "ciertamente", "definitivamente", "claramente", "obviamente",
+    "sin duda", "seguramente", "precisamente", "exactamente",
+    "debo", "exijo", "insisto", "decidido", "seguro", "firme"
+  ]
+}

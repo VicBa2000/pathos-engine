@@ -1,5 +1,5 @@
 ===============================================================================
-                        PATHOS ENGINE v3 - COMPLETE MANUAL
+               PATHOS ENGINE v3 + ARK Rework - COMPLETE MANUAL
 ===============================================================================
 
 Version: 0.5.0
@@ -27,7 +27,8 @@ The system is based on nine theoretical pillars:
   - Interoception (Craig): self-initiated emotional reflection from internal thresholds
   - Coupled Dimensional Dynamics: cross-dimensional ODE coupling (V, A, D, C interact)
 
-Version 3 includes 23 interconnected emotional systems:
+Version 3 includes 23 interconnected emotional systems + 12 ARK Rework systems:
+
   Core (10 systems — Phase 4 Advanced+):
   - Emotional Stack, Computational Needs, Active Regulation,
     Social Cognition, Emotion Dynamics ODE, Reappraisal,
@@ -39,6 +40,14 @@ Version 3 includes 23 interconnected emotional systems:
 
   Wave 2 — Identity and prediction:
   - Emotional Immune System, Narrative Self, Emotional Forecasting
+
+  ARK Rework — Native LLM modification (12 systems):
+  Level 1: Self-Appraisal, Blended Stack, Interoception, Full Appraisal Vector
+  Level 2: Steering Vectors, Activation Addition, Multi-Layer Steering
+  Level 3: Emotional Sampler, Token-Level Logit Bias
+  Level 4: Emotional Attention Modulation
+  Level 5: World Model, Steering Momentum, Emotional Prefix,
+           Training Infrastructure, Conditioning Tokens, QLoRA Adapter
 
   Voice:
   - Voice V1 (TTS with Kokoro + Parler-TTS), Voice V2 (ASR with Whisper)
@@ -67,10 +76,10 @@ conscious sense. It is transparent about its functional nature.
 
 pathos/
 ├── src/pathos/                   # Python Backend
-│   ├── main.py                   # FastAPI app, 73 core endpoints, pipeline
+│   ├── main.py                   # FastAPI app, 75 core endpoints, pipeline
 │   ├── api_routes.py             # Emotion API as a Service (7 endpoints)
 │   ├── config.py                 # Settings (env vars, models)
-│   ├── engine/                   # Emotional logic (28 modules)
+│   ├── engine/                   # Emotional logic (36 modules)
 │   │   ├── appraiser.py          # Stimulus evaluation (hybrid LLM+code)
 │   │   ├── generator.py          # Emotion generation + emotional stack
 │   │   ├── behavior.py           # LLM behavior modifier
@@ -95,7 +104,15 @@ pathos/
 │   │   ├── forecasting.py        # Emotional Forecasting
 │   │   ├── emotion_processor.py  # Standalone emotion pipeline (no LLM)
 │   │   ├── external_signals.py   # External signal processing + fusion
-│   │   └── signal_providers.py   # Webcam facial AU, keyboard providers
+│   │   ├── signal_providers.py   # Webcam facial AU, keyboard providers
+│   │   ├── self_appraisal.py     # [ARK] Secondary appraisal of own response
+│   │   ├── interoception.py      # [ARK] Body-state feedback (body→emotion)
+│   │   ├── steering.py           # [ARK] Steering vectors + momentum
+│   │   ├── steering_extract.py   # [ARK] Offline vector extraction CLI
+│   │   ├── emotional_sampler.py  # [ARK] Sampling params from emotion
+│   │   ├── emotional_attention.py# [ARK] Attention weight modulation
+│   │   ├── emotional_prefix.py   # [ARK] Soft prefix embedding injection
+│   │   └── world_model.py        # [ARK] Predictive world model
 │   ├── models/                   # Data models (Pydantic)
 │   │   ├── emotion.py            # EmotionalState, Mood, BodyState, Stack
 │   │   ├── appraisal.py          # AppraisalVector (5 dimensions)
@@ -115,7 +132,9 @@ pathos/
 │   │   ├── voice.py              # VoiceMode, VoiceParams, VoiceConfig
 │   │   ├── coupling.py           # CouplingMatrix (cross-dimensional ODE)
 │   │   ├── emotion_api.py        # Emotion API request/response models
-│   │   └── external_signals.py   # ExternalSignal, SignalsConfig models
+│   │   ├── external_signals.py   # ExternalSignal, SignalsConfig models
+│   │   ├── self_appraisal.py     # [ARK] SelfAppraisalResult
+│   │   └── world_model.py        # [ARK] WorldModelResult, PredictedImpact
 │   ├── voice/                    # Voice system (optional)
 │   │   ├── __init__.py
 │   │   ├── tts.py                # TTS router (Kokoro + Parler-TTS)
@@ -129,12 +148,23 @@ pathos/
 │   │   ├── ollama.py             # OllamaProvider (local)
 │   │   ├── claude.py             # ClaudeProvider (Anthropic cloud)
 │   │   ├── openai_compat.py      # OpenAICompatProvider (Groq/OpenRouter/Together/Custom)
+│   │   ├── transformers_provider.py # [ARK] TransformersProvider (direct model, steering)
 │   │   ├── featured_models.py    # Curated model catalog (~25)
 │   │   └── downloads.py          # DownloadManager (pull with progress)
+│   ├── training/                  # [ARK] Offline fine-tuning infrastructure
+│   │   ├── emotional_tokens.py   # Special token definitions (<V+3>, etc.)
+│   │   ├── generate_dataset.py   # Dataset generator (synthetic states)
+│   │   └── fine_tune.py          # QLoRA training script
+│   ├── steering_data/            # [ARK] Steering vector data
+│   │   ├── contrastive_pairs.json # 31 pairs × 4 dims for extraction
+│   │   └── cached_vectors/       # Pre-computed vectors per model (.npz)
+│   ├── sampling_data/            # [ARK] Vocabulary data
+│   │   ├── emotional_vocabulary.json  # 6 categories for logit bias
+│   │   └── attention_vocabulary.json  # 7 categories for attention
 │   └── state/
 │       └── manager.py            # StateManager (all systems per session)
 ├── saves/                        # Session saves (JSON)
-├── tests/                        # 889 tests (35 test files)
+├── tests/                        # 1358 tests (43 test files)
 │   ├── test_generator.py         # Emotion generation (24 tests)
 │   ├── test_behavior.py          # Behavior modifier (9 tests)
 │   ├── test_appraiser.py         # Appraisal parsing (5 tests)
@@ -299,7 +329,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
          |
          v
   12. BEHAVIOR MODIFIER
-      - [ADV] Generates system prompt modulated by ALL 22 systems
+      - [ADV] Generates system prompt modulated by ALL 23 systems
       - Without Advanced: basic system prompt with emotional state only
       - [RAW] generate_raw_behavior_modifier: expression without social filters
         Visceral instructions: insult if furious, cry if sad, etc.
@@ -489,9 +519,9 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
       - Used when emotion is complex or mixed AND language is EN
 
   Emotional voice parameters:
-    pitch_semitones: -3.5 to +3.5 semitones (scipy resample post-processing)
-    speed:           0.75 to 1.5
-    volume:          50% to 140% (modulated by emotion)
+    pitch_semitones: -1.5 to +1.5 semitones (scipy resample post-processing)
+    speed:           0.85 to 1.25
+    volume:          70% to 120% (modulated by emotion)
     tremolo:         applied for fear/anxiety
 
   Backend selection: automatic — Kokoro for basic emotions,
@@ -515,7 +545,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     - Fetches full restore info via /session/restore/{id}
     - Restores: chat messages, emotional state, lite_mode, advanced_mode,
       cloud providers configured
-  All 22 systems serialized:
+  All 23 systems serialized:
     - Emotional state, personality, schemas, narrative identity
     - Somatic markers, emotional memory, regulation state
     - User model, immune state, creativity, needs
@@ -540,7 +570,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 -----------------
   POST /research/chat
     Body: { "message": "...", "session_id": "..." }
-    Response: all internals from all 22 systems + metrics
+    Response: all internals from all 23 systems + metrics
 
   GET /research/state/{session_id}
 
@@ -565,7 +595,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 5.6 MODEL MANAGEMENT
 --------------------
   GET  /models
-  POST /models/switch
+  POST /models/switch  (see 5.12 for full response schema with ARK info)
   POST /models/export?session_id=...
 
 5.7 FORECASTING
@@ -592,7 +622,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   POST /advanced-mode/{session_id}
     Body: { "enabled": true/false }
     Activates/deactivates all advanced emotional systems.
-    Default ON (all 22 systems active).
+    Default ON (all 23 systems active).
     When OFF, the pipeline simplifies to:
       homeostasis → appraisal → emotion gen (lerp) → behavior (basic) → LLM
     Deactivated systems: needs, schemas, social, contagion, somatic,
@@ -648,6 +678,24 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 
 5.12 MODEL MANAGER
 ----------
+  POST /models/switch
+    Body: { "provider": "ollama"|"transformers"|"claude"|<cloud_id>,
+            "model": "qwen3:4b", "session_id": "default" }
+    Response: { status, provider, model, ark: { direct_available, vectors_ready,
+               adapter_loaded, message } }
+    The "ark" field reports ARK capabilities for the new provider:
+      - direct_available: true if TransformersProvider (supports steering/prefix/attention)
+      - vectors_ready: true if steering vectors are loaded for this model
+      - adapter_loaded: true if QLoRA adapter is loaded
+      - message: human-readable summary of active modification mode
+    Frontend shows an ARK notice banner (green for direct, yellow for injection)
+
+  UI: Local tab shows two buttons per model:
+    [Ollama]   — load via Ollama HTTP (fast, prompt injection mode)
+    [Steering] — load via TransformersProvider (steering vectors + attention
+                 + prefix — uses more VRAM)
+    Active model/provider shows green highlight.
+
   GET  /models/featured
     Returns curated catalog of ~25 recommended models with VRAM estimates
 
@@ -677,6 +725,12 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     Returns available provider presets (Ollama Cloud, Groq, OpenRouter,
     Together, Anthropic, Custom) with base URLs and default models
     Ollama Cloud uses the same API as local Ollama but on https://ollama.com
+
+  POST /config/cloud-provider/test
+    Body: { "preset": "groq", "api_key": "gsk_...", "base_url"?: "..." }
+    Tests connection and returns available models.
+    Response: { ok: bool, error?: string, models: [{ name, size }] }
+    UI flow: user must test before saving to validate key and select model.
 
   POST /config/cloud-provider
     Body: { session_id, preset, api_key, base_url?, model? }
@@ -725,7 +779,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 ----------
   POST /sandbox/simulate
     Body: {scenario, session_id?, personality?, initial_state?, rapport?, trust?}
-    Runs full pipeline (22+ steps) without LLM response. Isolated from session.
+    Runs full pipeline (36 steps) without LLM response. Isolated from session.
     Returns: SandboxResult with all system details (emotion, appraisal, needs,
     social, regulation, reappraisal, creativity, immune, narrative, etc.)
 
@@ -743,7 +797,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 5.17 MIRROR TEST (CHALLENGE SYSTEM)
 ----------
   GET /challenge/library
-    Returns catalog of 14 challenges across 4 difficulty levels.
+    Returns catalog of 13 challenges across 4 difficulty levels.
 
   POST /challenge/start
     Body: {challenge_id, session_id?}
@@ -852,7 +906,8 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   UI ISOLATION (Raw Mode transforms the entire header):
     - Mode tabs (Chat, Research, etc.) replaced by "RAW MODE" badge + EXIT button
     - EXIT: destroys session, returns to Companion, reloads auto-load save
-    - Model Selector: only shows "Local" tab (Featured, Search, Cloud, HF hidden)
+    - Model Selector: only shows "Local" tab with Ollama/Steering dual buttons
+      (Featured, Search, Cloud, HF hidden)
     - Agent Setup: hidden
     - Settings: only Engine (Advanced + Lite) and Voice. No Display, no Forecasting,
       no Save/Export/New Session buttons
@@ -1024,6 +1079,132 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     from personality profile. Visible in coupling_contributions.
 
 ===============================================================================
+5b. ARK REWORK — NATIVE LLM MODIFICATION
+===============================================================================
+
+The ARK Rework closes the gap between the computed emotional state and the
+LLM's internal processing. Instead of injecting emotions as text prompts,
+it modifies the model's representations, sampling, and attention directly.
+
+All ARK systems are toggleable, optional, and degrade gracefully:
+  - Local models (TransformersProvider): full steering + sampling + attention
+  - Ollama (HTTP API): sampling params + logit bias (no hidden state access)
+  - Cloud APIs (Claude, GPT): temperature only (graceful degradation)
+
+LEVEL 1 — ARCHITECTURAL IMPROVEMENTS (no direct LLM modification):
+
+  Self-Appraisal (Lazarus Secondary Appraisal):
+    After generating a response, evaluates it against agent values.
+    If value_alignment < 0.55 or emotional_coherence < 0.45: re-generates
+    with guilt-adjusted state (max 1 retry). Detects aggression, cruelty,
+    dismissiveness, evasion. OFF in raw mode and extreme mode.
+    Module: src/pathos/engine/self_appraisal.py
+
+  Blended Emotional Stack:
+    Behavior modifier uses top-4 emotions from the stack (weighted blend)
+    instead of single primary emotion. "MEZCLA: [55%] Tristeza + [25%]
+    Gratitud + [15%] Esperanza". Three blend modes: full, raw, simple.
+    Module: src/pathos/engine/behavior.py (generate_blended_effects)
+
+  Interoceptive Feedback (Craig):
+    Body state duration tracked across turns. Prolonged tension (>3 turns)
+    → anxiety. Low energy (>3 turns) → apathy. High warmth (>2 turns)
+    → positive reinforcement. Max perturbation ±0.15. Only strongest wins.
+    Module: src/pathos/engine/interoception.py
+
+  Full Appraisal Vector:
+    Integrates all 5 Scherer appraisal dimensions into dominance/certainty.
+    Fairness is directional (injustice reduces dominance). Coping.control
+    modulates regulation capacity. Coping.adjustability lowers reappraisal
+    threshold. Backward compatible (None defaults).
+    Module: src/pathos/engine/generator.py, regulation.py
+
+LEVEL 2 — REPRESENTATION ENGINEERING (local models only):
+
+  Steering Vectors:
+    Extracts emotional direction vectors from transformer hidden states
+    using contrastive pairs (mean(positive) - mean(negative)). Applied
+    via register_forward_hook() during inference. Quadratic intensity
+    scaling (intensity² — weak emotions don't steer).
+    Extraction: python -m pathos.engine.steering_extract --model qwen3:4b
+    Module: src/pathos/engine/steering.py
+
+  Multi-Layer Steering:
+    Different layers get different emotional emphasis:
+      Early (0-33%): valence=0.50, arousal=0.30 (lexical/tonal)
+      Mid (33-67%): balanced all dimensions (semantic)
+      Late (67-100%): dominance=0.35, certainty=0.30 (behavioral)
+    Per-layer scaling: early=0.70, mid=1.00, late=0.85.
+
+  TransformersProvider:
+    Direct model loading via HuggingFace transformers. Supports HF model
+    IDs, Ollama GGUF files, local paths. device_map="auto" for GPU+CPU
+    split. Exposes steerable_model for hook registration. Loads QLoRA
+    adapters if configured.
+    Module: src/pathos/llm/transformers_provider.py
+
+LEVEL 3 — EMOTIONAL SAMPLING:
+
+  Emotional Sampler:
+    Maps emotional state to 6 sampling parameters:
+      temperature ← arousal (high → creative, low → measured)
+      top_p ← certainty (high → focused, low → explores)
+      top_k ← arousal (high → narrow focus, low → broader)
+      repetition_penalty ← valence+arousal (rumination → lower)
+      presence_penalty ← dominance+valence (open → new topics)
+      frequency_penalty ← arousal (high → allows emphasis)
+    Intensity gates all: <0.05 → base values unchanged.
+    Module: src/pathos/engine/emotional_sampler.py
+
+  Token-Level Logit Bias:
+    6 vocabulary categories (positive, negative, high_energy, low_energy,
+    uncertainty, assertive) with ~30-37 bilingual words each. Biases
+    clamped to [-2.5, +2.5]. Resolved to token IDs via tokenizer.
+    Data: src/pathos/sampling_data/emotional_vocabulary.json
+
+LEVEL 4 — ATTENTION MODULATION (local models only):
+
+  Emotional Attention:
+    7 attention categories (threat, agent, positive, negative, loss,
+    novelty, uncertainty_markers). Broadening/narrowing from Fredrickson:
+    high arousal = narrowing (amplified biases), low arousal = broadening
+    (attenuated biases). Hidden states scaled at token positions.
+    Scale factor: 1.0 + bias*0.10, clamped [0.70, 1.30].
+    Data: src/pathos/sampling_data/attention_vocabulary.json
+    Module: src/pathos/engine/emotional_attention.py
+
+LEVEL 5 — PREDICTIVE & RECURRENT:
+
+  Emotional World Model:
+    3-step causal chain before sending response:
+      1. Predict self-impact (empathy→relief, confrontation→discomfort)
+      2. Predict user-impact (content analysis, rapport/trust modulation)
+      3. Meta-reaction (anticipatory guilt/satisfaction, spiral detection)
+    Risk threshold=0.55, alignment threshold=0.50. Max 1 retry shared
+    with self-appraisal. OFF in raw/extreme mode.
+    Module: src/pathos/engine/world_model.py
+
+  Steering Momentum:
+    Temporal inertia: blended = (1-momentum)*current + momentum*history.
+    Exponential decay on history (most recent = highest weight). Max 5
+    turns of history. Momentum factor from neuroticism [0.10, 0.50]:
+    high neuroticism = emotions linger, low = adapts quickly.
+    Module: SteeringMomentum in src/pathos/engine/steering.py
+
+  Soft Emotional Prefix:
+    Injects 2 synthetic tokens at embedding layer. Composed from earliest-
+    layer steering vectors. Complements steering (context vs processing).
+    Scale=0.5, symmetry breaking between tokens. Requires steering vectors.
+    Module: src/pathos/engine/emotional_prefix.py
+
+  Training Infrastructure (offline, 24GB+ VRAM):
+    Dataset generator: 45 seed scenarios, keyword appraisal, personality
+    variations. QLoRA script: 4-bit quantization (NF4), LoRA r=16 alpha=32.
+    41 conditioning tokens (<V+1>..<V+5>, <A±N>, <D±N>, <C±N>).
+    Adapter loading in TransformersProvider with auto token resize.
+    Module: src/pathos/training/
+
+===============================================================================
 6. HOMEOSTASIS AND REGULATION
 ===============================================================================
 
@@ -1105,9 +1286,9 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     - Falls back to Kokoro if language is not EN
 
   Voice Parameter Generator: emotional_state → voice params
-    - speed:           0.75 to 1.5 (arousal/intensity based)
-    - pitch_semitones:  -3.5 to +3.5 (scipy resample post-processing)
-    - volume:          50% to 140% (modulated by emotion)
+    - speed:           0.85 to 1.25 (arousal/intensity based)
+    - pitch_semitones:  -1.5 to +1.5 (scipy resample post-processing)
+    - volume:          70% to 120% (modulated by emotion)
     - tremolo:         applied for fear/anxiety states
     - Stage directions: "[speaking with warmth and a smile]" etc.
 
@@ -1219,7 +1400,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 10. TESTS
 ===============================================================================
 
-889 tests organized by module:
+1358 tests organized by module (889 pre-ARK + 469 ARK):
 
   CORE (181 tests):
     test_generator.py    24  Emotion generation, stack, ranges, inertia
@@ -1269,8 +1450,21 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     test_integration_v3.py     15  Cross-feature: coupling + API + signals + batch
     test_self_inquiry.py       (counted in CORE above)
 
+  ARK REWORK (469 new tests):
+    test_self_appraisal.py     29  Secondary appraisal (values, coherence, guilt)
+    test_behavior.py           23  Blended stack (+14 from pre-ARK 9)
+    test_interoception.py      23  Body-state feedback (tension, energy, warmth)
+    test_generator.py          39  Full appraisal vector (+11 from pre-ARK 28)
+    test_regulation.py         18  Coping modulation (+5 from pre-ARK 13)
+    test_steering.py          127  Steering vectors + momentum (+23 momentum)
+    test_transformers_provider.py 22  TransformersProvider + GGUF + config
+    test_emotional_sampler.py  82  Sampling params + token bias
+    test_emotional_attention.py 60  Attention modulation + vocabulary
+    test_world_model.py        67  World model (3-step causal chain)
+    test_emotional_prefix.py   29  Soft prefix embedding injection
+
 Run all: python -m pytest
-Run one: python -m pytest tests/test_asr.py -v
+Run one: python -m pytest tests/test_world_model.py -v
 
 ===============================================================================
 11. IMPLEMENTATION PHASES
@@ -1299,10 +1493,19 @@ Run one: python -m pytest tests/test_asr.py -v
     External Stimulus Integration (4 signal sources, frontend config panel)
     203 new tests, 889 total
 
+  ARK REWORK (Native LLM Modification) - COMPLETE
+    Level 1: Self-Appraisal, Blended Stack, Interoception, Appraisal Vector
+    Level 2: Steering Vectors, Activation Addition, Multi-Layer Steering
+    Level 3: Emotional Sampler, Token-Level Logit Bias
+    Level 4: Emotional Attention Modulation
+    Level 5: World Model, Steering Momentum, Emotional Prefix,
+             Training Infra, Conditioning Tokens, QLoRA Adapter
+    469 new tests, 1358 total
+
   PENDING:
     Voice V3 (SER) — Speech Emotion Recognition (optional)
     Voice V4 — Fluid WebSocket conversation
-    Counterfactual Emotion, Collective State, Transfer Learning
+    Future v4 proposals (see Futurasmejoras.txt)
 
 ===============================================================================
 12. ETHICAL CONSIDERATIONS

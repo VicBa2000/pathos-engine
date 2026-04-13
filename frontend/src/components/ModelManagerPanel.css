@@ -164,6 +164,33 @@
   color: #889;
   flex-shrink: 0;
 }
+.mm-model-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.mm-btn-sm--switch {
+  font-size: 10px;
+  padding: 2px 8px;
+}
+.mm-btn-sm--steering {
+  font-size: 10px;
+  padding: 2px 8px;
+  background: #2a1a4a;
+  border-color: #5a3a8a;
+  color: #c8a0f0;
+}
+.mm-btn-sm--steering:hover {
+  background: #3a2a6a;
+  color: #e0c0ff;
+}
+.mm-btn-sm--steering.mm-btn-sm--active {
+  background: #3a1a6a;
+  border-color: #7a4aaa;
+  color: #e0c0ff;
+}
 .mm-model-row__delete {
   background: none;
   border: none;
@@ -560,5 +587,51 @@
   opacity: 0.6;
 }
 .mm-dl__cancel:hover {
+  opacity: 1;
+}
+
+/* ARK Mode Notice */
+.mm-ark-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 0 8px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  animation: ark-notice-in 0.3s ease-out;
+}
+@keyframes ark-notice-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.mm-ark-notice--direct {
+  background: rgba(46, 204, 113, 0.15);
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  color: #2ecc71;
+}
+.mm-ark-notice--injection {
+  background: rgba(241, 196, 15, 0.12);
+  border: 1px solid rgba(241, 196, 15, 0.25);
+  color: #f1c40f;
+}
+.mm-ark-notice__icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.mm-ark-notice__text {
+  flex: 1;
+  line-height: 1.3;
+}
+.mm-ark-notice__close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+  opacity: 0.6;
+  padding: 0 2px;
+}
+.mm-ark-notice__close:hover {
   opacity: 1;
 }

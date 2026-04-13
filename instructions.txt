@@ -1,5 +1,5 @@
 ===============================================================================
-                   PATHOS ENGINE v3 - USAGE INSTRUCTIONS
+              PATHOS ENGINE v3 + ARK Rework - USAGE INSTRUCTIONS
 ===============================================================================
 
 ===============================================================================
@@ -116,12 +116,22 @@
     # PATHOS_LLM_PROVIDER=claude
     # PATHOS_ANTHROPIC_API_KEY=sk-ant-...
 
+    # To use Transformers (direct model with steering/prefix/attention support)
+    # PATHOS_LLM_PROVIDER=transformers
+    # PATHOS_TRANSFORMERS_MODEL=qwen3:4b
+    # PATHOS_TRANSFORMERS_DEVICE_MAP=auto
+    # PATHOS_TRANSFORMERS_ADAPTER_PATH=adapters/emotional  (optional, QLoRA adapter)
+
   3.2 CHANGE MODEL
   ------------------
     a) From the interface: click on the model selector (top right corner).
        The Model Manager Panel opens with 5 tabs:
 
-       LOCAL       — installed Ollama models, click to activate, trash to delete
+       LOCAL       — installed Ollama models with dual loading mode per model:
+                     [Ollama] loads via Ollama HTTP (fast, prompt injection mode)
+                     [Steering] loads via Transformers (steering vectors + attention
+                     + prefix — uses more VRAM, requires TransformersProvider)
+                     Active model shows green highlight. Trash icon to delete.
        FEATURED    — curated catalog of ~25 models by category with estimated VRAM
                      (Small & Fast, Balanced, Large & Powerful, Code, Vision)
        SEARCH      — search the Ollama library, direct download
@@ -142,8 +152,10 @@
       1. Click "+ Add Provider"
       2. Select preset (Ollama Cloud, Groq, OpenRouter, Together, Claude, Custom)
       3. Enter API key (for Ollama Cloud: create at ollama.com)
-      4. Optionally change model or base URL
-      5. Click "Save"
+      4. For Custom preset: also enter base URL
+      5. Click "Test Connection" — validates key and fetches available models
+      6. Select model from the returned list
+      7. Click "Save"
 
     The configuration is saved in the session save (not in .env).
     It is automatically restored when loading the session.
@@ -165,6 +177,40 @@
   NOTE: The .env file is OPTIONAL. Without it, everything works with local
   Ollama using the default models (qwen3:4b + nomic-embed-text).
   Cloud providers are configured from the interface, not from .env.
+
+  3.4 ARK REWORK — NATIVE LLM MODIFICATION (optional)
+  -----------------------------------------------------
+  The ARK systems modify the LLM's internal processing (not just prompts).
+  They work at 3 levels — all are optional and gracefully degrade:
+
+    LEVEL 1 — No setup needed (works with all providers):
+      Self-Appraisal, Blended Stack, Interoception, Appraisal Vector,
+      World Model, Emotional Sampler (temperature/top_p/logit_bias)
+
+    LEVEL 2 — Requires TransformersProvider + steering vectors:
+      Steering Vectors, Steering Momentum, Emotional Prefix, Attention Modulation
+
+      Setup:
+        1. Set PATHOS_LLM_PROVIDER=transformers in .env
+        2. Extract steering vectors (one-time, offline):
+             python -m pathos.engine.steering_extract --model qwen3:4b
+           Vectors are cached in src/pathos/steering_data/cached_vectors/
+        3. Start the server. Steering hooks are applied automatically.
+
+    LEVEL 3 — Requires QLoRA training (24GB+ VRAM):
+      Conditioning Tokens, Emotional Adapter
+
+      Setup:
+        1. Generate training dataset:
+             python -m pathos.training.generate_dataset --output training_data/emotional.jsonl --count 10
+        2. Train adapter (requires peft + 24GB+ GPU):
+             python -m pathos.training.fine_tune --model Qwen/Qwen3-4B --dataset training_data/emotional.jsonl --output adapters/emotional
+        3. Set PATHOS_TRANSFORMERS_ADAPTER_PATH=adapters/emotional in .env
+        4. Enable toggles: conditioning_tokens_enabled=True, emotional_adapter_enabled=True
+
+  Without any setup, all ARK systems that don't require direct model access
+  work automatically. The system always falls back to prompt injection for
+  cloud APIs (Claude, OpenAI, Groq, etc).
 
 ===============================================================================
 4. USAGE GUIDE - WEB INTERFACE
@@ -203,6 +249,21 @@
                          OFF = simple pipeline, ~70% faster with Ollama
       [Lite Mode]        Toggle lite mode (1 LLM call, keyword appraisal)
       [Forecasting]      Toggle emotional impact prediction
+
+    ARK Systems (native LLM modification — Advanced mode required):
+      [Self-Appraisal]   Evaluate own response against values (OFF in raw/extreme)
+      [World Model]      Predict emotional impact before sending (OFF in raw/extreme)
+      [Steering]         Modify LLM hidden states via vectors (local models only)
+      [Steering Momentum] Temporal inertia across turns (requires Steering)
+      [Emotional Prefix] Inject emotional embeddings at input layer (local models only)
+      [Emotional Sampler] Modify sampling params from emotional state
+      [Attention Modul.] Bias attention weights by emotion (local models only)
+      [Conditioning Tokens] Use trained special tokens (requires QLoRA adapter)
+      [Emotional Adapter]  Use QLoRA emotional adapter (requires trained adapter)
+
+      Note: Steering, Prefix, and Attention require TransformersProvider
+      (local model with direct weight access). They are NO-OP with Ollama HTTP
+      or cloud APIs — the system falls back to prompt injection gracefully.
 
     Voice:
       [Voice Output]     Toggle agent voice (TTS)
@@ -342,7 +403,7 @@
   ------------------------------------
   Game: guide the agent to a target emotional state via conversation.
 
-    Library: 14 challenges in 4 levels:
+    Library: 13 challenges in 4 levels:
     - Easy (4): Make Me Happy, Touch of Melancholy, Righteous Fire, Into the Unknown
     - Medium (4): Energy Surge, Inner Peace, Grateful Heart, Deep Thought
     - Hard (3): Bittersweet, Sense of Awe, Hope from Despair
@@ -450,8 +511,9 @@
     When entering Raw Mode, the interface transforms completely:
     - Mode tabs (Chat, Research, etc.) DISAPPEAR
     - In their place: "RAW MODE" badge + red "EXIT" button
-    - Model Selector: only shows "Local" tab (installed Ollama models)
-      Featured, Search, Cloud, and HuggingFace tabs are hidden.
+    - Model Selector: only shows "Local" tab (installed Ollama models
+      with Ollama/Steering dual buttons). Featured, Search, Cloud,
+      and HuggingFace tabs are hidden.
     - Agent Setup: HIDDEN (not applicable in raw)
     - Settings: only Engine (Advanced + Lite) and Voice
       No Display, no Forecasting, no Save/Export/New Session
@@ -591,7 +653,7 @@
     curl http://localhost:8000/state/advanced/default
 
 ===============================================================================
-7. THE 22 EMOTIONAL SYSTEMS
+7. THE 23 EMOTIONAL SYSTEMS
 ===============================================================================
 
   NOTE: The 23 emotional systems include 6 basic ones (homeostasis,
@@ -786,7 +848,7 @@
 11. RUNNING TESTS
 ===============================================================================
 
-  # All tests (889)
+  # All tests (1358)
   python -m pytest
 
   # With detail

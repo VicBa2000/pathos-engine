@@ -43,9 +43,15 @@ const STEP_ICONS: Record<string, string> = {
   emergent: "\u{1f33f}",     // sprout
   creativity: "\u{1f3a8}",   // palette
   forecasting: "\u{1f52e}",  // crystal ball
+  interoception: "\u{1f9e0}",  // brain (body->emotion)
   post_processing: "\u{1f4be}",// floppy
   behavior: "\u{1f3ad}",     // theater masks
+  steering: "\u{1f9f2}",     // magnet (hidden state modification)
+  emotional_prefix: "\u{1f3f7}",// label (embedding injection)
+  attention: "\u{1f441}",    // eye (attention modulation)
   llm_response: "\u{1f4ac}",  // speech bubble
+  self_appraisal: "\u{1fa9e}",// mirror (self-evaluation)
+  world_model: "\u{1f30d}",  // globe (predictive world model)
   voice: "\u{1f50a}",        // speaker
 };
 

@@ -349,6 +349,66 @@ export interface CouplingDetails {
   contribution_c: number;
 }
 
+// --- ARK Rework Systems ---
+
+export interface SelfAppraisalDetails {
+  applied: boolean;
+  value_alignment: number;
+  emotional_coherence: number;
+  predicted_self_valence: number;
+  should_regenerate: boolean;
+  did_regenerate: boolean;
+  reason: string;
+  adjustments: string[];
+}
+
+export interface WorldModelDetails {
+  applied: boolean;
+  predicted_self_valence_shift: number;
+  predicted_self_effect: string;
+  predicted_user_valence_shift: number;
+  predicted_user_effect: string;
+  meta_reaction_effect: string;
+  value_alignment: number;
+  emotional_risk: number;
+  should_modify: boolean;
+  did_modify: boolean;
+  reason: string;
+}
+
+export interface SteeringDetails {
+  enabled: boolean;
+  status: string;
+  model_id: string | null;
+  dimensions: string[];
+  layers: number[];
+  layer_roles: Record<string, number[]>;
+  multilayer: boolean;
+  total_vectors: number;
+  momentum_enabled: boolean;
+  momentum_factor: number;
+  momentum_turns_stored: number;
+}
+
+export interface EmotionalPrefixDetails {
+  enabled: boolean;
+  status: string;
+  num_tokens: number;
+  embedding_norm: number;
+  dominant_dimension: string;
+  scale: number;
+}
+
+export interface AttentionDetails {
+  enabled: boolean;
+  status: string;
+  categories_active: Record<string, number>;
+  broadening_factor: number;
+  positions_biased: number;
+  layers_hooked: number[];
+  words_biased: number;
+}
+
 // --- External Signals ---
 
 export interface SignalSourceMeta {
@@ -418,6 +478,13 @@ export interface ResearchChatResponse {
   forecasting: ForecastingDetails;
   coupling: CouplingDetails;
   voice: VoiceDetails;
+
+  // ARK Rework systems
+  self_appraisal: SelfAppraisalDetails;
+  world_model: WorldModelDetails;
+  steering: SteeringDetails;
+  emotional_prefix: EmotionalPrefixDetails;
+  attention: AttentionDetails;
 
   // Results
   emotional_state: EmotionalState;

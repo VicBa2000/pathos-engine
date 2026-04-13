@@ -56,6 +56,8 @@ class EmotionalRegulator(BaseModel):
         self,
         state: EmotionalState,
         personality_regulation_base: float = 0.7,
+        coping_control: float | None = None,
+        coping_adjustability: float | None = None,
     ) -> tuple[EmotionalState, RegulationResult]:
         """Intenta regular el estado emocional si es necesario.
 
@@ -66,6 +68,10 @@ class EmotionalRegulator(BaseModel):
         Args:
             state: Estado emocional a regular.
             personality_regulation_base: Base de regulación de la personalidad.
+            coping_control: Control percibido del appraisal (0-1). Si disponible,
+                modula la capacidad efectiva de regulación.
+            coping_adjustability: Adaptabilidad del appraisal (0-1). Si disponible,
+                influye en la selección de estrategia (favorece reappraisal).
 
         Returns:
             (estado regulado, resultado de regulación)
@@ -84,7 +90,10 @@ class EmotionalRegulator(BaseModel):
             return state, result
 
         # ¿Tiene capacidad para regular?
+        # coping_control modula: alto control → regulación más efectiva
         effective_capacity = self.regulation_capacity * personality_regulation_base
+        if coping_control is not None:
+            effective_capacity *= (0.7 + 0.3 * coping_control)
 
         if effective_capacity < 0.15:
             # EMOTIONAL BREAKTHROUGH — no puede regular
@@ -99,7 +108,7 @@ class EmotionalRegulator(BaseModel):
             return regulated, result
 
         # Seleccionar estrategia
-        strategy = self._select_strategy(state)
+        strategy = self._select_strategy(state, coping_adjustability=coping_adjustability)
         result.strategy_used = strategy
         result.state_before = state.model_copy()
 
@@ -166,13 +175,18 @@ class EmotionalRegulator(BaseModel):
 
         return regulated, result
 
-    def _select_strategy(self, state: EmotionalState) -> str:
+    def _select_strategy(
+        self,
+        state: EmotionalState,
+        coping_adjustability: float | None = None,
+    ) -> str:
         """Selecciona la mejor estrategia de regulación.
 
         - Emociones negativas intensas → reappraisal (si hay capacidad)
         - Emociones negativas moderadas → suppression (rápido, barato)
         - Alta disonancia → expression (para descargar)
         - Anxiety/rumination → distraction
+        - Alta adjustability → favorece reappraisal (flexibilidad cognitiva)
         """
         # Si hay mucha disonancia acumulada, expresar
         if self.suppression_dissonance > 0.5:
@@ -182,8 +196,17 @@ class EmotionalRegulator(BaseModel):
         if state.primary_emotion in (PrimaryEmotion.ANXIETY, PrimaryEmotion.FEAR):
             return "distraction" if self.regulation_capacity > 0.3 else "suppression"
 
+        # Alta adjustability baja el umbral para reappraisal (flexibilidad cognitiva)
+        reappraisal_capacity_threshold = 0.4
+        if coping_adjustability is not None and coping_adjustability > 0.6:
+            reappraisal_capacity_threshold = 0.25
+
         # Emociones intensas y negativas → reappraisal si hay capacidad
-        if state.valence < -0.3 and state.intensity > 0.7 and self.regulation_capacity > 0.4:
+        if (
+            state.valence < -0.3
+            and state.intensity > 0.7
+            and self.regulation_capacity > reappraisal_capacity_threshold
+        ):
             return "reappraisal"
 
         # Default: suppression (económico)

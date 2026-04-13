@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings
 class LLMProviderType(str, Enum):
     OLLAMA = "ollama"
     CLAUDE = "claude"
+    TRANSFORMERS = "transformers"
 
 
 class Settings(BaseSettings):
@@ -25,6 +26,11 @@ class Settings(BaseSettings):
     # Claude
     anthropic_api_key: str = ""
     claude_model: str = "claude-sonnet-4-20250514"
+
+    # Transformers (direct model loading with steering support)
+    transformers_model: str = "qwen3:4b"  # Ollama name, HF ID, or local path
+    transformers_device_map: str = "auto"  # "auto", "cpu", or "cuda"
+    transformers_adapter_path: str = ""  # Path to QLoRA adapter (5.2b/5.3b). Empty = no adapter.
 
     # Server
     host: str = "127.0.0.1"
