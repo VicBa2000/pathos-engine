@@ -164,6 +164,33 @@
   color: #889;
   flex-shrink: 0;
 }
+.mm-model-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.mm-btn-sm--switch {
+  font-size: 10px;
+  padding: 2px 8px;
+}
+.mm-btn-sm--steering {
+  font-size: 10px;
+  padding: 2px 8px;
+  background: #2a1a4a;
+  border-color: #5a3a8a;
+  color: #c8a0f0;
+}
+.mm-btn-sm--steering:hover {
+  background: #3a2a6a;
+  color: #e0c0ff;
+}
+.mm-btn-sm--steering.mm-btn-sm--active {
+  background: #3a1a6a;
+  border-color: #7a4aaa;
+  color: #e0c0ff;
+}
 .mm-model-row__delete {
   background: none;
   border: none;

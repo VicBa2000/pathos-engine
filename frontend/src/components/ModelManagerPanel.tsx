@@ -18,6 +18,7 @@ export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, o
   const [tab, setTab] = useState<Tab>("local");
   const panelRef = useRef<HTMLDivElement>(null);
   const [arkNotice, setArkNotice] = useState<ArkSwitchInfo | null>(null);
+  const [activeProvider, setActiveProvider] = useState<string>("ollama");
 
   // --- Shared state ---
   const [downloads, setDownloads] = useState<DownloadStatus[]>([]);
@@ -73,6 +74,7 @@ export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, o
     try {
       const result = await api.switchModel(provider, model, sessionId);
       onModelChanged(provider, model);
+      setActiveProvider(provider);
       if (result.ark) {
         setArkNotice(result.ark);
         setTimeout(() => setArkNotice(null), 8000);
@@ -117,6 +119,7 @@ export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, o
           <LocalTab
             models={ollamaModels}
             currentModel={currentModel}
+            activeProvider={activeProvider}
             onSwitch={handleSwitch}
             onRefresh={refreshLocal}
             onDelete={(name) => {
@@ -167,12 +170,13 @@ export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, o
 // Tab: Local Models
 // ============================================================
 
-function LocalTab({ models, currentModel, onSwitch, onRefresh, onDelete }: {
+function LocalTab({ models, currentModel, onSwitch, onRefresh, onDelete, activeProvider }: {
   models: ModelInfo[];
   currentModel: string;
   onSwitch: (p: string, m: string) => void;
   onRefresh: () => void;
   onDelete: (name: string) => void;
+  activeProvider: string;
 }) {
   return (
     <div className="mm-local">
@@ -181,22 +185,42 @@ function LocalTab({ models, currentModel, onSwitch, onRefresh, onDelete }: {
         <button className="mm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
       </div>
       {models.length === 0 && <div className="mm-empty">No local models. Is Ollama running?</div>}
-      {models.map(m => (
-        <div
-          key={m.name}
-          className={`mm-model-row ${m.name === currentModel ? "mm-model-row--active" : ""}`}
-          onClick={() => onSwitch("ollama", m.name)}
-        >
-          <span className="mm-model-row__check">{m.name === currentModel ? "✓" : ""}</span>
-          <span className="mm-model-row__name">{m.name}</span>
-          <span className="mm-model-row__size">{m.size}</span>
-          <button
-            className="mm-model-row__delete"
-            onClick={(e) => { e.stopPropagation(); onDelete(m.name); }}
-            title="Delete model"
-          >🗑</button>
-        </div>
-      ))}
+      {models.map(m => {
+        const isActive = m.name === currentModel;
+        const isDirectActive = isActive && activeProvider === "transformers";
+        const isOllamaActive = isActive && activeProvider !== "transformers";
+        return (
+          <div
+            key={m.name}
+            className={`mm-model-row ${isActive ? "mm-model-row--active" : ""}`}
+          >
+            <span className="mm-model-row__check">{isActive ? "✓" : ""}</span>
+            <span className="mm-model-row__name">{m.name}</span>
+            <span className="mm-model-row__size">{m.size}</span>
+            <div className="mm-model-row__actions">
+              <button
+                className={`mm-btn-sm mm-btn-sm--switch ${isOllamaActive ? "mm-btn-sm--active" : ""}`}
+                onClick={() => onSwitch("ollama", m.name)}
+                title="Load via Ollama (fast, prompt injection mode)"
+              >
+                {isOllamaActive ? "Active" : "Ollama"}
+              </button>
+              <button
+                className={`mm-btn-sm mm-btn-sm--steering ${isDirectActive ? "mm-btn-sm--active" : ""}`}
+                onClick={() => onSwitch("transformers", m.name)}
+                title="Load via Transformers (steering vectors + attention + prefix — uses more VRAM)"
+              >
+                {isDirectActive ? "Steering ✓" : "Steering"}
+              </button>
+              <button
+                className="mm-model-row__delete"
+                onClick={(e) => { e.stopPropagation(); onDelete(m.name); }}
+                title="Delete model"
+              >🗑</button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

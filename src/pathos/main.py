@@ -12,7 +12,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 import httpx
 from fastapi import FastAPI, HTTPException, UploadFile
@@ -4828,7 +4828,7 @@ async def list_models(session_id: str = "default") -> list[ModelInfo]:
 
 
 @app.post("/models/switch")
-async def switch_model(req: SwitchModelRequest) -> dict[str, str]:
+async def switch_model(req: SwitchModelRequest) -> dict[str, Any]:
     """Cambia el modelo activo en runtime. Supports ollama, claude, and cloud providers."""
     global llm_provider
 

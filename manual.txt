@@ -595,7 +595,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 5.6 MODEL MANAGEMENT
 --------------------
   GET  /models
-  POST /models/switch
+  POST /models/switch  (see 5.12 for full response schema with ARK info)
   POST /models/export?session_id=...
 
 5.7 FORECASTING
@@ -678,6 +678,24 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 
 5.12 MODEL MANAGER
 ----------
+  POST /models/switch
+    Body: { "provider": "ollama"|"transformers"|"claude"|<cloud_id>,
+            "model": "qwen3:4b", "session_id": "default" }
+    Response: { status, provider, model, ark: { direct_available, vectors_ready,
+               adapter_loaded, message } }
+    The "ark" field reports ARK capabilities for the new provider:
+      - direct_available: true if TransformersProvider (supports steering/prefix/attention)
+      - vectors_ready: true if steering vectors are loaded for this model
+      - adapter_loaded: true if QLoRA adapter is loaded
+      - message: human-readable summary of active modification mode
+    Frontend shows an ARK notice banner (green for direct, yellow for injection)
+
+  UI: Local tab shows two buttons per model:
+    [Ollama]   — load via Ollama HTTP (fast, prompt injection mode)
+    [Steering] — load via TransformersProvider (steering vectors + attention
+                 + prefix — uses more VRAM)
+    Active model/provider shows green highlight.
+
   GET  /models/featured
     Returns curated catalog of ~25 recommended models with VRAM estimates
 
@@ -707,6 +725,12 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     Returns available provider presets (Ollama Cloud, Groq, OpenRouter,
     Together, Anthropic, Custom) with base URLs and default models
     Ollama Cloud uses the same API as local Ollama but on https://ollama.com
+
+  POST /config/cloud-provider/test
+    Body: { "preset": "groq", "api_key": "gsk_...", "base_url"?: "..." }
+    Tests connection and returns available models.
+    Response: { ok: bool, error?: string, models: [{ name, size }] }
+    UI flow: user must test before saving to validate key and select model.
 
   POST /config/cloud-provider
     Body: { session_id, preset, api_key, base_url?, model? }
@@ -882,7 +906,8 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   UI ISOLATION (Raw Mode transforms the entire header):
     - Mode tabs (Chat, Research, etc.) replaced by "RAW MODE" badge + EXIT button
     - EXIT: destroys session, returns to Companion, reloads auto-load save
-    - Model Selector: only shows "Local" tab (Featured, Search, Cloud, HF hidden)
+    - Model Selector: only shows "Local" tab with Ollama/Steering dual buttons
+      (Featured, Search, Cloud, HF hidden)
     - Agent Setup: hidden
     - Settings: only Engine (Advanced + Lite) and Voice. No Display, no Forecasting,
       no Save/Export/New Session buttons

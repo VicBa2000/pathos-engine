@@ -398,7 +398,7 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 
 ## API Overview
 
-80 endpoints organized by function. Full interactive documentation at `/docs` when running.
+82 endpoints organized by function. Full interactive documentation at `/docs` when running.
 
 **Core:**
 - `POST /chat` — Main conversation (full pipeline)

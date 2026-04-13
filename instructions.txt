@@ -127,7 +127,11 @@
     a) From the interface: click on the model selector (top right corner).
        The Model Manager Panel opens with 5 tabs:
 
-       LOCAL       — installed Ollama models, click to activate, trash to delete
+       LOCAL       — installed Ollama models with dual loading mode per model:
+                     [Ollama] loads via Ollama HTTP (fast, prompt injection mode)
+                     [Steering] loads via Transformers (steering vectors + attention
+                     + prefix — uses more VRAM, requires TransformersProvider)
+                     Active model shows green highlight. Trash icon to delete.
        FEATURED    — curated catalog of ~25 models by category with estimated VRAM
                      (Small & Fast, Balanced, Large & Powerful, Code, Vision)
        SEARCH      — search the Ollama library, direct download
@@ -148,8 +152,10 @@
       1. Click "+ Add Provider"
       2. Select preset (Ollama Cloud, Groq, OpenRouter, Together, Claude, Custom)
       3. Enter API key (for Ollama Cloud: create at ollama.com)
-      4. Optionally change model or base URL
-      5. Click "Save"
+      4. For Custom preset: also enter base URL
+      5. Click "Test Connection" — validates key and fetches available models
+      6. Select model from the returned list
+      7. Click "Save"
 
     The configuration is saved in the session save (not in .env).
     It is automatically restored when loading the session.
@@ -505,8 +511,9 @@
     When entering Raw Mode, the interface transforms completely:
     - Mode tabs (Chat, Research, etc.) DISAPPEAR
     - In their place: "RAW MODE" badge + red "EXIT" button
-    - Model Selector: only shows "Local" tab (installed Ollama models)
-      Featured, Search, Cloud, and HuggingFace tabs are hidden.
+    - Model Selector: only shows "Local" tab (installed Ollama models
+      with Ollama/Steering dual buttons). Featured, Search, Cloud,
+      and HuggingFace tabs are hidden.
     - Agent Setup: HIDDEN (not applicable in raw)
     - Settings: only Engine (Advanced + Lite) and Voice
       No Display, no Forecasting, no Save/Export/New Session
