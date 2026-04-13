@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as api from "../api/client";
-import type { ModelInfo, FeaturedModel, SearchResult, DownloadStatus, HuggingFaceCheck, CloudPreset, CloudProviderInfo, CloudTestResult } from "../api/client";
+import type { ModelInfo, FeaturedModel, SearchResult, DownloadStatus, HuggingFaceCheck, CloudPreset, CloudProviderInfo, CloudTestResult, ArkSwitchInfo } from "../api/client";
 import "./ModelManagerPanel.css";
 
 type Tab = "local" | "featured" | "search" | "cloud" | "hf";
@@ -17,6 +17,7 @@ interface Props {
 export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, onModelChanged, localOnly }: Props) {
   const [tab, setTab] = useState<Tab>("local");
   const panelRef = useRef<HTMLDivElement>(null);
+  const [arkNotice, setArkNotice] = useState<ArkSwitchInfo | null>(null);
 
   // --- Shared state ---
   const [downloads, setDownloads] = useState<DownloadStatus[]>([]);
@@ -70,12 +71,16 @@ export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, o
 
   const handleSwitch = useCallback(async (provider: string, model: string) => {
     try {
-      await api.switchModel(provider, model, sessionId);
+      const result = await api.switchModel(provider, model, sessionId);
       onModelChanged(provider, model);
+      if (result.ark) {
+        setArkNotice(result.ark);
+        setTimeout(() => setArkNotice(null), 8000);
+      }
     } catch (err) {
       console.error("Switch failed:", err);
     }
-  }, [onModelChanged]);
+  }, [onModelChanged, sessionId]);
 
   if (!visible) return null;
 
@@ -98,6 +103,14 @@ export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, o
           </button>
         ))}
       </div>
+
+      {arkNotice && (
+        <div className={`mm-ark-notice ${arkNotice.direct_available ? "mm-ark-notice--direct" : "mm-ark-notice--injection"}`}>
+          <span className="mm-ark-notice__icon">{arkNotice.direct_available ? "\u{1f9f2}" : "\u{1f4dd}"}</span>
+          <span className="mm-ark-notice__text">{arkNotice.message}</span>
+          <button className="mm-ark-notice__close" onClick={() => setArkNotice(null)}>&times;</button>
+        </div>
+      )}
 
       <div className="mm-panel__content">
         {tab === "local" && (

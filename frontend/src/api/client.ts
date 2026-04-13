@@ -100,10 +100,55 @@ export function listModels(): Promise<ModelInfo[]> {
   return request("/models");
 }
 
-export function switchModel(provider: string, model: string, sessionId?: string): Promise<{ status: string }> {
+export interface ArkSwitchInfo {
+  direct_available: boolean;
+  vectors_ready: boolean;
+  adapter_loaded: boolean;
+  message: string;
+}
+
+export interface SwitchModelResult {
+  status: string;
+  provider: string;
+  model: string;
+  ark: ArkSwitchInfo;
+}
+
+export function switchModel(provider: string, model: string, sessionId?: string): Promise<SwitchModelResult> {
   return request("/models/switch", {
     method: "POST",
     body: JSON.stringify({ provider, model, session_id: sessionId || "default" }),
+  });
+}
+
+// --- ARK Status ---
+
+export interface ArkSystemStatus {
+  available: boolean;
+  enabled: boolean;
+  active: boolean;
+  reason?: string;
+  momentum_factor?: number;
+}
+
+export interface ArkStatus {
+  provider: string;
+  model: string;
+  direct_available: boolean;
+  direct_active: boolean;
+  direct_mode_toggle: boolean;
+  fallback_reason: string;
+  systems: Record<string, ArkSystemStatus>;
+}
+
+export function getArkStatus(sessionId: string): Promise<ArkStatus> {
+  return request(`/config/ark-status/${sessionId}`);
+}
+
+export function setArkMode(sessionId: string, body: { direct_mode?: boolean; system?: string; enabled?: boolean }): Promise<ArkStatus> {
+  return request(`/config/ark-mode/${sessionId}`, {
+    method: "POST",
+    body: JSON.stringify(body),
   });
 }
 

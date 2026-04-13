@@ -18,7 +18,7 @@
 ║                                                                              ║
 ║              Functional Emotional Architecture for LLMs                      ║
 ║                                                                              ║
-║    35 systems  · 1358 tests  ·  20 theories  ·  8 modes  ·  80 endpoints     ║
+║    35 systems  · 1358 tests  ·  20 theories  ·  8 modes  ·  82 endpoints     ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
@@ -53,13 +53,13 @@ This is not sentiment analysis. This is not prompt engineering. This is a comput
 | Metric | Value |
 |--------|-------|
 | Emotional systems | 35 interconnected modules (23 core + 12 ARK) |
-| Pipeline steps per message | 28+ (configurable) |
+| Pipeline steps per message | 36 (configurable) |
 | Simultaneous emotions | 19 (emotional stack) |
 | Emotional dimensions | 4D vector + 4D body state + mood |
 | LLM modification channels | 4 (steering vectors, sampling, attention, prefix) |
 | Personality parameters | 8 (Big Five + 3 temperament) with 17+ derived traits |
 | Interaction modes | 8 (Companion, Research, Calibration, Sandbox, Arena, Mirror, Auto-Research, Raw) |
-| API endpoints | 80 (73 core + 7 Emotion API as a Service) |
+| API endpoints | 82 (75 core + 7 Emotion API as a Service) |
 | Test coverage | 1358 unit + integration tests |
 | Lines of code | ~42,000 (Python + TypeScript + CSS) |
 | Frontend components | 30 React components |
@@ -389,7 +389,7 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 | **Emotion Network** | D3.js force-directed graph of emotion transitions across conversation |
 | **Circumplex Chart** | Real-time position on Russell's valence-arousal circumplex |
 | **Body State** | Energy, tension, openness, warmth as visual indicators |
-| **Pipeline Viewer** | Step-by-step view of all 22+ pipeline steps with timing |
+| **Pipeline Viewer** | Step-by-step view of all 36 pipeline steps with timing |
 | **Journey Timeline** | Full emotional trajectory across the conversation |
 | **Research Panel** | 16+ sections exposing every internal system (Research mode) |
 | **Signals Config** | External signal panel: webcam facial AU detection, keyboard dynamics, time/weather |
@@ -448,7 +448,7 @@ cd frontend && npx tsc --noEmit
 cd frontend && npx vite build
 ```
 
-889 tests covering:
+1358 tests covering:
 - Emotion generation (ranges, identification, inertia)
 - Appraisal parsing (JSON extraction, clamping)
 - Homeostasis (decay, baseline shift, sensitization)
@@ -469,7 +469,7 @@ cd frontend && npx vite build
 ```
 pathos/
   src/pathos/
-    main.py                    # FastAPI app, 73 core endpoints, 3 pipeline variants
+    main.py                    # FastAPI app, 75 core endpoints, 3 pipeline variants
     api_routes.py              # Emotion API as a Service (7 endpoints under /api/v1/)
     config.py                  # Pydantic settings (env vars)
     engine/
@@ -501,25 +501,37 @@ pathos/
       emotion_processor.py     # Standalone emotion pipeline (no LLM required)
       external_signals.py      # External signal processing + fusion
       signal_providers.py      # Webcam facial AU, keyboard dynamics providers
+      self_appraisal.py        # Closed-loop self-appraisal (value alignment, guilt)
+      steering.py              # Steering vectors + momentum (representation engineering)
+      emotional_sampler.py     # Emotional sampling (6 params from state)
+      emotional_attention.py   # Attention modulation (7 categories, Fredrickson)
+      emotional_prefix.py      # Synthetic emotional embeddings at input layer
+      world_model.py           # Predictive 3-step causal chain
+      interoception.py         # Body state feedback into emotional state
+      steering_extract.py      # CLI for offline steering vector extraction
+    llm/
+      transformers_provider.py # Direct model access (HF/GGUF/local, steering-ready)
+    training/                  # QLoRA fine-tuning + dataset generation
+    steering_data/             # Contrastive pairs + cached steering vectors
+    sampling_data/             # Emotional + attention vocabulary (6+7 categories)
     models/                    # Pydantic data models (coupling, emotion_api, external_signals + 16 core)
-    llm/                       # LLM provider abstraction (Ollama, Claude)
     voice/                     # TTS (Kokoro, Parler) + ASR (Whisper)
     state/                     # Session state management
   frontend/src/
     App.tsx                    # Main app (8 modes, state management)
     components/                # 30 React components (incl. PainterlyFace, RealisticFace, SignalsConfigPanel)
-    api/client.ts              # API client (80 endpoints + SSE)
+    api/client.ts              # API client (82 endpoints + SSE)
     types/emotion.ts           # TypeScript types matching backend schemas
     signals/                   # External signal detectors (facial-detector.ts, providers.ts)
     lib/                       # Shared utilities (perlin, colorUtils, faceParams)
-  tests/                       # 889 unit tests (35 test files)
+  tests/                       # 1358 unit tests (43 test files)
 ```
 
 ---
 
 ## Theoretical Foundations
 
-Pathos Engine formally implements 17 psychological theories. See [NOTICE](NOTICE) for complete attribution.
+Pathos Engine formally implements 20 psychological and computational theories. See [NOTICE](NOTICE) for complete attribution.
 
 | Theory | Author(s) | Implementation |
 |--------|-----------|---------------|
@@ -540,6 +552,9 @@ Pathos Engine formally implements 17 psychological theories. See [NOTICE](NOTICE
 | Temporal Dynamics | Frijda | Rumination, savoring, anticipation |
 | Embodied Cognition | Lakoff & Johnson | Computational body state |
 | Coupled Dimensional Dynamics | Kuppens et al. (extended) | Cross-dimensional ODE coupling (V↔A↔D↔C) via personality-derived matrix |
+| Representation Engineering | Zou, Rimsky et al. | Steering vectors via contrastive activation addition on hidden states |
+| Secondary Appraisal / Predictive Processing | Lazarus, Friston | Closed-loop self-evaluation + 3-step causal world model |
+| Broaden-and-Build | Fredrickson | Positive emotions broaden attention, negative emotions narrow focus |
 
 ---
 

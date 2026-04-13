@@ -76,10 +76,10 @@ conscious sense. It is transparent about its functional nature.
 
 pathos/
 ├── src/pathos/                   # Python Backend
-│   ├── main.py                   # FastAPI app, 73 core endpoints, pipeline
+│   ├── main.py                   # FastAPI app, 75 core endpoints, pipeline
 │   ├── api_routes.py             # Emotion API as a Service (7 endpoints)
 │   ├── config.py                 # Settings (env vars, models)
-│   ├── engine/                   # Emotional logic (28 modules)
+│   ├── engine/                   # Emotional logic (36 modules)
 │   │   ├── appraiser.py          # Stimulus evaluation (hybrid LLM+code)
 │   │   ├── generator.py          # Emotion generation + emotional stack
 │   │   ├── behavior.py           # LLM behavior modifier
@@ -164,7 +164,7 @@ pathos/
 │   └── state/
 │       └── manager.py            # StateManager (all systems per session)
 ├── saves/                        # Session saves (JSON)
-├── tests/                        # 1358 tests (40+ test files)
+├── tests/                        # 1358 tests (43 test files)
 │   ├── test_generator.py         # Emotion generation (24 tests)
 │   ├── test_behavior.py          # Behavior modifier (9 tests)
 │   ├── test_appraiser.py         # Appraisal parsing (5 tests)
@@ -329,7 +329,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
          |
          v
   12. BEHAVIOR MODIFIER
-      - [ADV] Generates system prompt modulated by ALL 22 systems
+      - [ADV] Generates system prompt modulated by ALL 23 systems
       - Without Advanced: basic system prompt with emotional state only
       - [RAW] generate_raw_behavior_modifier: expression without social filters
         Visceral instructions: insult if furious, cry if sad, etc.
@@ -519,9 +519,9 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
       - Used when emotion is complex or mixed AND language is EN
 
   Emotional voice parameters:
-    pitch_semitones: -3.5 to +3.5 semitones (scipy resample post-processing)
-    speed:           0.75 to 1.5
-    volume:          50% to 140% (modulated by emotion)
+    pitch_semitones: -1.5 to +1.5 semitones (scipy resample post-processing)
+    speed:           0.85 to 1.25
+    volume:          70% to 120% (modulated by emotion)
     tremolo:         applied for fear/anxiety
 
   Backend selection: automatic — Kokoro for basic emotions,
@@ -545,7 +545,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     - Fetches full restore info via /session/restore/{id}
     - Restores: chat messages, emotional state, lite_mode, advanced_mode,
       cloud providers configured
-  All 22 systems serialized:
+  All 23 systems serialized:
     - Emotional state, personality, schemas, narrative identity
     - Somatic markers, emotional memory, regulation state
     - User model, immune state, creativity, needs
@@ -570,7 +570,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 -----------------
   POST /research/chat
     Body: { "message": "...", "session_id": "..." }
-    Response: all internals from all 22 systems + metrics
+    Response: all internals from all 23 systems + metrics
 
   GET /research/state/{session_id}
 
@@ -622,7 +622,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   POST /advanced-mode/{session_id}
     Body: { "enabled": true/false }
     Activates/deactivates all advanced emotional systems.
-    Default ON (all 22 systems active).
+    Default ON (all 23 systems active).
     When OFF, the pipeline simplifies to:
       homeostasis → appraisal → emotion gen (lerp) → behavior (basic) → LLM
     Deactivated systems: needs, schemas, social, contagion, somatic,
@@ -755,7 +755,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 ----------
   POST /sandbox/simulate
     Body: {scenario, session_id?, personality?, initial_state?, rapport?, trust?}
-    Runs full pipeline (22+ steps) without LLM response. Isolated from session.
+    Runs full pipeline (36 steps) without LLM response. Isolated from session.
     Returns: SandboxResult with all system details (emotion, appraisal, needs,
     social, regulation, reappraisal, creativity, immune, narrative, etc.)
 
@@ -773,7 +773,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
 5.17 MIRROR TEST (CHALLENGE SYSTEM)
 ----------
   GET /challenge/library
-    Returns catalog of 14 challenges across 4 difficulty levels.
+    Returns catalog of 13 challenges across 4 difficulty levels.
 
   POST /challenge/start
     Body: {challenge_id, session_id?}
@@ -1261,9 +1261,9 @@ LEVEL 5 — PREDICTIVE & RECURRENT:
     - Falls back to Kokoro if language is not EN
 
   Voice Parameter Generator: emotional_state → voice params
-    - speed:           0.75 to 1.5 (arousal/intensity based)
-    - pitch_semitones:  -3.5 to +3.5 (scipy resample post-processing)
-    - volume:          50% to 140% (modulated by emotion)
+    - speed:           0.85 to 1.25 (arousal/intensity based)
+    - pitch_semitones:  -1.5 to +1.5 (scipy resample post-processing)
+    - volume:          70% to 120% (modulated by emotion)
     - tremolo:         applied for fear/anxiety states
     - Stage directions: "[speaking with warmth and a smile]" etc.
 

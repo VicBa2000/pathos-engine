@@ -397,7 +397,7 @@
   ------------------------------------
   Game: guide the agent to a target emotional state via conversation.
 
-    Library: 14 challenges in 4 levels:
+    Library: 13 challenges in 4 levels:
     - Easy (4): Make Me Happy, Touch of Melancholy, Righteous Fire, Into the Unknown
     - Medium (4): Energy Surge, Inner Peace, Grateful Heart, Deep Thought
     - Hard (3): Bittersweet, Sense of Awe, Hope from Despair
@@ -646,7 +646,7 @@
     curl http://localhost:8000/state/advanced/default
 
 ===============================================================================
-7. THE 22 EMOTIONAL SYSTEMS
+7. THE 23 EMOTIONAL SYSTEMS
 ===============================================================================
 
   NOTE: The 23 emotional systems include 6 basic ones (homeostasis,
@@ -841,7 +841,7 @@
 11. RUNNING TESTS
 ===============================================================================
 
-  # All tests (889)
+  # All tests (1358)
   python -m pytest
 
   # With detail

@@ -177,6 +177,8 @@ Pathos Engine is built on the shoulders of these open source projects:
     LangDetect (Michal Mimino Danilák) — Apache 2.0
     cryptography (Python Cryptographic Authority) — Apache 2.0/BSD
     DuckDuckGo Search (deedy5) — MIT License
+    Pydantic Settings (Samuel Colvin) — MIT License
+    python-multipart (Andrew Frankel) — Apache 2.0
 
   FRONTEND (TypeScript):
     React (Meta Platforms) — MIT License
@@ -185,6 +187,7 @@ Pathos Engine is built on the shoulders of these open source projects:
     @react-three/fiber (Poimandres) — MIT License
     @react-three/drei (Poimandres) — MIT License
     @vladmandic/face-api (Vladimir Mandic) — MIT License
+    meshoptimizer (Arseny Kapoulkine) — MIT License
     Vite (Evan You) — MIT License
     TypeScript (Microsoft) — Apache 2.0
 
@@ -194,6 +197,7 @@ Pathos Engine is built on the shoulders of these open source projects:
     OpenAI Whisper (OpenAI) — MIT License
     PyTorch (Meta AI) — BSD License
     SciPy (SciPy Developers) — BSD License
+    SoundFile (Bastian Bechtold) — BSD License
 
   LLM PROVIDERS:
     Ollama (Ollama, Inc.) — MIT License

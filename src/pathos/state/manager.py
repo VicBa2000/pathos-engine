@@ -80,6 +80,7 @@ class SessionState:
         self.self_appraisal_enabled: bool = True  # Self-appraisal: evaluate own response against values
         self.world_model_enabled: bool = True  # World model: predict emotional impact before sending
         self.interoceptive_state: InteroceptiveState = InteroceptiveState()  # Body-state duration tracking
+        self.direct_mode: bool = True  # Direct LLM modification (steering/prefix/attention) vs prompt injection only
         self.steering_enabled: bool = True  # Steering vectors: modify LLM hidden states (local models only)
         self.steering_momentum_enabled: bool = True  # Steering momentum: temporal inertia across turns
         self.steering_momentum: SteeringMomentum = SteeringMomentum()  # Momentum state per session

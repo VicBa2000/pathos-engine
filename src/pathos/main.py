@@ -1124,6 +1124,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     momentum_used = False
     if (
         session.steering_enabled
+        and session.direct_mode
         and session.advanced_mode
         and llm_provider.supports_steering
         and steering_engine.is_ready
@@ -1173,6 +1174,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     prefix_active = False
     if (
         session.emotional_prefix_enabled
+        and session.direct_mode
         and session.advanced_mode
         and llm_provider.supports_steering
         and steering_engine.is_ready
@@ -1213,6 +1215,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     attention_bias_result: AttentionBiasResult | None = None
     if (
         session.emotional_attention_enabled
+        and session.direct_mode
         and session.advanced_mode
         and llm_provider.supports_steering  # same requirement: direct model access
     ):
@@ -1880,6 +1883,7 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     steering_active_r = False
     if (
         session.steering_enabled
+        and session.direct_mode
         and session.advanced_mode
         and llm_provider.supports_steering
         and steering_engine.is_ready
@@ -1912,6 +1916,7 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     prefix_active_r = False
     if (
         session.emotional_prefix_enabled
+        and session.direct_mode
         and session.advanced_mode
         and llm_provider.supports_steering
         and steering_engine.is_ready
@@ -1939,6 +1944,7 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     attention_bias_r: AttentionBiasResult | None = None
     if (
         session.emotional_attention_enabled
+        and session.direct_mode
         and session.advanced_mode
         and llm_provider.supports_steering
     ):
@@ -3608,6 +3614,139 @@ async def toggle_advanced_mode(session_id: str, body: dict) -> dict:
     }
 
 
+@app.get("/config/ark-status/{session_id}")
+async def get_ark_status(session_id: str) -> dict:
+    """Return ARK Rework system status: what's available, what's active.
+
+    Reports whether direct LLM modification (steering/prefix/attention) is
+    available based on the current provider, model, and hardware. Also reports
+    whether the user has chosen to use direct mode or prompt injection fallback.
+    """
+    session = state_manager.get_session(session_id)
+
+    provider_supports = llm_provider.supports_steering if llm_provider else False
+    vectors_ready = steering_engine.is_ready
+    has_adapter = hasattr(llm_provider, "has_adapter") and llm_provider.has_adapter if llm_provider else False
+    provider_name = type(llm_provider).__name__ if llm_provider else "none"
+    model_name = llm_provider.model if llm_provider else "none"
+
+    # Direct mode: available if provider supports it AND user wants it
+    direct_available = provider_supports
+    direct_active = direct_available and session.direct_mode
+
+    # Per-system availability
+    steering_available = direct_available and vectors_ready
+    prefix_available = direct_available and vectors_ready
+    attention_available = direct_available
+    conditioning_available = has_adapter
+    adapter_available = has_adapter
+
+    return {
+        "provider": provider_name,
+        "model": model_name,
+
+        # Global mode
+        "direct_available": direct_available,
+        "direct_active": direct_active,
+        "direct_mode_toggle": session.direct_mode,
+        "fallback_reason": (
+            "" if direct_available else
+            "provider_http_only" if provider_name in ("OllamaProvider", "ClaudeProvider", "OpenAICompatProvider") else
+            "no_provider"
+        ),
+
+        # Per-system status
+        "systems": {
+            "steering": {
+                "available": steering_available,
+                "enabled": session.steering_enabled,
+                "active": steering_available and session.steering_enabled and direct_active,
+                "reason": "" if steering_available else ("no_vectors" if direct_available else "needs_transformers_provider"),
+            },
+            "steering_momentum": {
+                "available": steering_available,
+                "enabled": session.steering_momentum_enabled,
+                "active": steering_available and session.steering_momentum_enabled and direct_active,
+                "momentum_factor": round(session.steering_momentum.momentum, 3),
+            },
+            "emotional_prefix": {
+                "available": prefix_available,
+                "enabled": session.emotional_prefix_enabled,
+                "active": prefix_available and session.emotional_prefix_enabled and direct_active,
+            },
+            "attention": {
+                "available": attention_available,
+                "enabled": session.emotional_attention_enabled,
+                "active": attention_available and session.emotional_attention_enabled and direct_active,
+            },
+            "sampler": {
+                "available": True,  # Works with all providers (partial for cloud)
+                "enabled": session.emotional_sampler_enabled,
+                "active": session.emotional_sampler_enabled and session.advanced_mode,
+            },
+            "self_appraisal": {
+                "available": True,
+                "enabled": session.self_appraisal_enabled,
+                "active": session.self_appraisal_enabled and session.advanced_mode,
+            },
+            "world_model": {
+                "available": True,
+                "enabled": session.world_model_enabled,
+                "active": session.world_model_enabled and session.advanced_mode,
+            },
+            "conditioning_tokens": {
+                "available": conditioning_available,
+                "enabled": session.conditioning_tokens_enabled,
+                "active": conditioning_available and session.conditioning_tokens_enabled,
+                "reason": "" if conditioning_available else "needs_qlora_adapter",
+            },
+            "emotional_adapter": {
+                "available": adapter_available,
+                "enabled": session.emotional_adapter_enabled,
+                "active": adapter_available and session.emotional_adapter_enabled,
+                "reason": "" if adapter_available else "needs_qlora_adapter",
+            },
+        },
+    }
+
+
+@app.post("/config/ark-mode/{session_id}")
+async def toggle_ark_mode(session_id: str, body: dict) -> dict:
+    """Toggle direct LLM modification mode vs prompt injection fallback.
+
+    Body: {"direct_mode": true/false}
+    When direct_mode=true and provider supports it: steering, prefix, attention active.
+    When direct_mode=false: all systems fall back to prompt injection only.
+
+    Can also toggle individual systems:
+    Body: {"system": "steering", "enabled": false}
+    """
+    session = state_manager.get_session(session_id)
+
+    if "direct_mode" in body:
+        session.direct_mode = bool(body["direct_mode"])
+
+    if "system" in body and "enabled" in body:
+        system = body["system"]
+        enabled = bool(body["enabled"])
+        toggle_map = {
+            "steering": "steering_enabled",
+            "steering_momentum": "steering_momentum_enabled",
+            "emotional_prefix": "emotional_prefix_enabled",
+            "attention": "emotional_attention_enabled",
+            "sampler": "emotional_sampler_enabled",
+            "self_appraisal": "self_appraisal_enabled",
+            "world_model": "world_model_enabled",
+            "conditioning_tokens": "conditioning_tokens_enabled",
+            "emotional_adapter": "emotional_adapter_enabled",
+        }
+        attr = toggle_map.get(system)
+        if attr and hasattr(session, attr):
+            setattr(session, attr, enabled)
+
+    return await get_ark_status(session_id)
+
+
 @app.post("/voice/config/{session_id}")
 async def configure_voice(session_id: str, body: dict) -> dict:
     """Configure voice settings for a session.
@@ -4760,7 +4899,28 @@ async def switch_model(req: SwitchModelRequest) -> dict[str, str]:
                     provider_name=req.provider,
                 )
 
-    return {"status": "ok", "provider": req.provider, "model": req.model}
+    # Report ARK capabilities for the new provider
+    direct_available = llm_provider.supports_steering if llm_provider else False
+    vectors_ready = steering_engine.is_ready
+    has_adapter = hasattr(llm_provider, "has_adapter") and llm_provider.has_adapter if llm_provider else False
+
+    return {
+        "status": "ok",
+        "provider": req.provider,
+        "model": req.model,
+        "ark": {
+            "direct_available": direct_available,
+            "vectors_ready": vectors_ready,
+            "adapter_loaded": has_adapter,
+            "message": (
+                "Direct LLM modification active (steering + prefix + attention)"
+                if direct_available and vectors_ready
+                else "Direct modification available, extract steering vectors to enable"
+                if direct_available
+                else "Prompt injection mode (switch to TransformersProvider for direct modification)"
+            ),
+        },
+    }
 
 
 # --- Model Management: Featured, Pull, Search, Delete, HuggingFace, Claude Key ---
