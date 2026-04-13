@@ -44,7 +44,7 @@ voice-parler = [
 ]
 steering = [
     "torch>=2.0.0",
-    "transformers>=4.35.0",
+    "transformers>=4.48.0",
     "gguf>=0.10.0",
     "accelerate>=0.25.0",
 ]

@@ -171,18 +171,19 @@ class TransformersProvider(LLMProvider):
             ) from e
 
         model_path = self._model_id
-        gguf_file: str | None = None
 
-        # Check if it's an Ollama model name (contains ":" like "qwen3:4b")
+        # For Ollama model names, use HuggingFace safetensors (not GGUF).
+        # GGUF dequantization in transformers 4.46.x produces corrupt weights
+        # (missing lm_head, tensor size mismatches). HF safetensors are cached
+        # after first download (~4GB one-time) and load cleanly.
         if ":" in self._model_id and "/" not in self._model_id:
-            gguf_path = find_ollama_gguf(self._model_id)
-            if gguf_path is not None:
-                logger.info("Found Ollama GGUF for '%s' at %s", self._model_id, gguf_path)
-                model_path = str(gguf_path.parent)
-                gguf_file = gguf_path.name
+            hf_id = _ollama_to_hf_id(self._model_id)
+            if hf_id:
+                model_path = hf_id
+                logger.info("Using HuggingFace model for '%s' → '%s'", self._model_id, hf_id)
             else:
                 logger.warning(
-                    "Ollama GGUF for '%s' not found. Attempting as HuggingFace model ID.",
+                    "No HuggingFace mapping for '%s'. Attempting as HF model ID.",
                     self._model_id,
                 )
 
@@ -194,40 +195,37 @@ class TransformersProvider(LLMProvider):
         else:
             dtype = torch.float32
 
-        logger.info(
-            "Loading model '%s' (device_map=%s, dtype=%s)...",
-            self._model_id, self._device_map, dtype,
+        # Load tokenizer
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            model_path, trust_remote_code=True,
         )
-
-        load_kwargs: dict[str, Any] = {
-            "torch_dtype": dtype,
-            "device_map": self._device_map,
-            "trust_remote_code": True,
-        }
-        if gguf_file:
-            load_kwargs["gguf_file"] = gguf_file
-
-        # Load tokenizer (try same path, fallback to model_id for GGUF)
-        try:
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                model_path, trust_remote_code=True,
-            )
-        except Exception:
-            # GGUF blobs don't have tokenizer files — try the HF model ID
-            hf_id = _ollama_to_hf_id(self._model_id)
-            if hf_id:
-                self._tokenizer = AutoTokenizer.from_pretrained(
-                    hf_id, trust_remote_code=True,
-                )
-            else:
-                raise
 
         if self._tokenizer.pad_token is None:
             self._tokenizer.pad_token = self._tokenizer.eos_token
 
-        self._model = AutoModelForCausalLM.from_pretrained(
-            model_path, **load_kwargs,
-        )
+        # Load model on a single device. device_map="auto" (accelerate) causes
+        # rotary embedding mismatches in transformers 4.46.x. Try GPU first,
+        # fall back to CPU if OOM.
+        target_device = "cpu"
+        if torch.cuda.is_available():
+            try:
+                logger.info("Loading model '%s' on GPU (dtype=%s)...", self._model_id, dtype)
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    model_path, torch_dtype=dtype, trust_remote_code=True,
+                ).to("cuda")
+                target_device = "cuda"
+            except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+                logger.warning("GPU OOM for '%s': %s. Loading on CPU...", self._model_id, e)
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    model_path, torch_dtype=torch.float32, trust_remote_code=True,
+                )
+        else:
+            logger.info("Loading model '%s' on CPU (dtype=%s)...", self._model_id, dtype)
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_path, torch_dtype=torch.float32, trust_remote_code=True,
+            )
 
         # Load QLoRA adapter if specified (5.2b/5.3b)
         if self._adapter_path and Path(self._adapter_path).exists():
@@ -311,9 +309,12 @@ class TransformersProvider(LLMProvider):
         inputs = self._tokenizer(
             prompt,
             return_tensors="pt",
-            truncation=True,
-            max_length=4096,
         )
+        # Truncate manually if needed (avoid attention_mask padding issues)
+        if inputs["input_ids"].shape[1] > 4096:
+            inputs["input_ids"] = inputs["input_ids"][:, -4096:]
+            if "attention_mask" in inputs:
+                inputs["attention_mask"] = inputs["attention_mask"][:, -4096:]
         # Move to model's device
         device = next(self._model.parameters()).device
         inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -443,21 +444,37 @@ class TransformersProvider(LLMProvider):
 # --- Utility: Ollama model name → HuggingFace model ID ---
 
 _OLLAMA_TO_HF: dict[str, str] = {
+    # Ollama models are instruct variants — map to instruct HF IDs
     "qwen3:4b": "Qwen/Qwen3-4B",
     "qwen3:1.7b": "Qwen/Qwen3-1.7B",
     "qwen3:0.6b": "Qwen/Qwen3-0.6B",
     "qwen3:8b": "Qwen/Qwen3-8B",
-    "qwen2.5:3b": "Qwen/Qwen2.5-3B",
-    "qwen2.5:7b": "Qwen/Qwen2.5-7B",
+    "qwen2.5:0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
+    "qwen2.5:1.5b": "Qwen/Qwen2.5-1.5B-Instruct",
+    "qwen2.5:3b": "Qwen/Qwen2.5-3B-Instruct",
+    "qwen2.5:7b": "Qwen/Qwen2.5-7B-Instruct",
     "llama3.2:1b": "meta-llama/Llama-3.2-1B-Instruct",
     "llama3.2:3b": "meta-llama/Llama-3.2-3B-Instruct",
     "llama3.1:8b": "meta-llama/Llama-3.1-8B-Instruct",
     "mistral:7b": "mistralai/Mistral-7B-Instruct-v0.3",
     "gemma2:2b": "google/gemma-2-2b-it",
     "gemma2:9b": "google/gemma-2-9b-it",
+    "gemma3:1b": "google/gemma-3-1b-it",
+    "gemma3:4b": "google/gemma-3-4b-it",
+    "gemma4:12b": "google/gemma-4-12b-it",
     "phi3:mini": "microsoft/Phi-3-mini-4k-instruct",
     "phi4:14b": "microsoft/phi-4",
 }
+
+# Auto-inference patterns: org/Model-Size format on HuggingFace
+_OLLAMA_HF_PATTERNS: list[tuple[str, str]] = [
+    ("llama", "meta-llama/Llama-{ver}-{size}-Instruct"),
+    ("gemma", "google/gemma-{ver}-{size}-it"),
+    ("qwen", "Qwen/Qwen{ver}-{size}"),
+    ("mistral", "mistralai/Mistral-{size}-Instruct-v0.3"),
+    ("phi", "microsoft/Phi-{ver}-{size}"),
+    ("starcoder", "bigcode/starcoder2-{size}"),
+]
 
 
 def _ollama_to_hf_id(ollama_name: str) -> str | None:

@@ -94,10 +94,19 @@ export interface ModelInfo {
   name: string;
   size: string;
   provider: string;
+  steering_compatible: boolean;
+  vectors_cached: boolean;
 }
 
 export function listModels(): Promise<ModelInfo[]> {
   return request("/models");
+}
+
+export function extractSteeringVectors(model: string): Promise<{ status: string; model: string; total_time_s?: number }> {
+  return request("/models/steering/extract", {
+    method: "POST",
+    body: JSON.stringify({ model }),
+  });
 }
 
 export interface ArkSwitchInfo {

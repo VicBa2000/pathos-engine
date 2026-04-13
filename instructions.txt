@@ -127,11 +127,15 @@
     a) From the interface: click on the model selector (top right corner).
        The Model Manager Panel opens with 5 tabs:
 
-       LOCAL       — installed Ollama models with dual loading mode per model:
-                     [Ollama] loads via Ollama HTTP (fast, prompt injection mode)
-                     [Steering] loads via Transformers (steering vectors + attention
-                     + prefix — uses more VRAM, requires TransformersProvider)
-                     Active model shows green highlight. Trash icon to delete.
+       LOCAL       — installed Ollama models with Ollama/Steering toggle per model:
+                     Toggle left (green) = Ollama HTTP (fast, prompt injection)
+                     Toggle right (purple) = Steering (direct LLM modification via
+                     TransformersProvider — steering vectors + attention + prefix)
+                     Toggle disabled (grey) if model architecture not compatible.
+                     Compatible architectures: llama, qwen2/2.5, mistral, phi3,
+                     starcoder2. First Steering activation downloads HuggingFace
+                     safetensors (~4GB one-time, cached) and extracts vectors.
+                     Click model row to select via Ollama. Trash icon to delete.
        FEATURED    — curated catalog of ~25 models by category with estimated VRAM
                      (Small & Fast, Balanced, Large & Powerful, Code, Vision)
        SEARCH      — search the Ollama library, direct download
@@ -190,12 +194,21 @@
     LEVEL 2 — Requires TransformersProvider + steering vectors:
       Steering Vectors, Steering Momentum, Emotional Prefix, Attention Modulation
 
-      Setup:
+      Setup (automatic via UI):
+        1. In Model Manager, toggle "Steering" on a compatible model
+        2. First activation downloads HuggingFace safetensors (~4GB, cached)
+           and auto-extracts steering vectors (2-5 min GPU, 10-30 min CPU)
+        3. Subsequent activations load from cache instantly
+
+      Setup (manual CLI):
         1. Set PATHOS_LLM_PROVIDER=transformers in .env
         2. Extract steering vectors (one-time, offline):
-             python -m pathos.engine.steering_extract --model qwen3:4b
+             python -m pathos.engine.steering_extract --model qwen2.5:3b
            Vectors are cached in src/pathos/steering_data/cached_vectors/
         3. Start the server. Steering hooks are applied automatically.
+
+      Compatible models: llama3.x, qwen2.5, mistral, phi3/4, codellama, starcoder2
+      NOT compatible: qwen3, gemma (GGUF architecture not supported by transformers)
 
     LEVEL 3 — Requires QLoRA training (24GB+ VRAM):
       Conditioning Tokens, Emotional Adapter
@@ -512,7 +525,7 @@
     - Mode tabs (Chat, Research, etc.) DISAPPEAR
     - In their place: "RAW MODE" badge + red "EXIT" button
     - Model Selector: only shows "Local" tab (installed Ollama models
-      with Ollama/Steering dual buttons). Featured, Search, Cloud,
+      with Ollama/Steering toggle). Featured, Search, Cloud,
       and HuggingFace tabs are hidden.
     - Agent Setup: HIDDEN (not applicable in raw)
     - Settings: only Engine (Advanced + Lite) and Voice

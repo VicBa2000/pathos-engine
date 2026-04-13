@@ -67,6 +67,8 @@ export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, o
       refreshLocal();
       // Remove completed after 3s
       setTimeout(() => setDownloads(prev => prev.filter(d => d.name !== name)), 3000);
+      // Auto-extract steering vectors in background (no-op if incompatible)
+      api.extractSteeringVectors(name).then(() => refreshLocal()).catch(() => {});
     }).catch(() => {});
   }, [refreshLocal]);
 
@@ -81,6 +83,9 @@ export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, o
       }
     } catch (err) {
       console.error("Switch failed:", err);
+      const msg = err instanceof Error ? err.message : "Switch failed";
+      setArkNotice({ direct_available: false, vectors_ready: false, adapter_loaded: false, message: msg });
+      setTimeout(() => setArkNotice(null), 8000);
     }
   }, [onModelChanged, sessionId]);
 
@@ -107,8 +112,8 @@ export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, o
       </div>
 
       {arkNotice && (
-        <div className={`mm-ark-notice ${arkNotice.direct_available ? "mm-ark-notice--direct" : "mm-ark-notice--injection"}`}>
-          <span className="mm-ark-notice__icon">{arkNotice.direct_available ? "\u{1f9f2}" : "\u{1f4dd}"}</span>
+        <div className={`mm-ark-notice ${arkNotice.direct_available ? "mm-ark-notice--direct" : !arkNotice.vectors_ready && !arkNotice.adapter_loaded && !arkNotice.direct_available ? "mm-ark-notice--error" : "mm-ark-notice--injection"}`}>
+          <span className="mm-ark-notice__icon">{arkNotice.direct_available ? "\u{1f9f2}" : !arkNotice.vectors_ready && !arkNotice.adapter_loaded && !arkNotice.direct_available ? "\u26a0\ufe0f" : "\u{1f4dd}"}</span>
           <span className="mm-ark-notice__text">{arkNotice.message}</span>
           <button className="mm-ark-notice__close" onClick={() => setArkNotice(null)}>&times;</button>
         </div>
@@ -173,11 +178,41 @@ export function ModelManagerPanel({ visible, onClose, currentModel, sessionId, o
 function LocalTab({ models, currentModel, onSwitch, onRefresh, onDelete, activeProvider }: {
   models: ModelInfo[];
   currentModel: string;
-  onSwitch: (p: string, m: string) => void;
+  onSwitch: (p: string, m: string) => Promise<void> | void;
   onRefresh: () => void;
   onDelete: (name: string) => void;
   activeProvider: string;
 }) {
+  const [extracting, setExtracting] = useState<string | null>(null);
+  const [switching, setSwitching] = useState<string | null>(null);
+
+  const handleToggleSteering = async (model: string, hasCached: boolean, currentlyDirect: boolean) => {
+    if (currentlyDirect) {
+      setSwitching(model);
+      try { await onSwitch("ollama", model); } finally { setSwitching(null); }
+      return;
+    }
+    if (hasCached) {
+      setSwitching(model);
+      try { await onSwitch("transformers", model); } finally { setSwitching(null); }
+      return;
+    }
+    // Extract vectors first, then switch
+    setExtracting(model);
+    try {
+      const result = await api.extractSteeringVectors(model);
+      if (result.status === "done" || result.status === "already_cached") {
+        onRefresh();
+        setSwitching(model);
+        setExtracting(null);
+        try { await onSwitch("transformers", model); } finally { setSwitching(null); }
+      }
+    } catch (err) {
+      console.error("Extraction failed:", err);
+      setExtracting(null);
+    }
+  };
+
   return (
     <div className="mm-local">
       <div className="mm-local__header">
@@ -188,30 +223,45 @@ function LocalTab({ models, currentModel, onSwitch, onRefresh, onDelete, activeP
       {models.map(m => {
         const isActive = m.name === currentModel;
         const isDirectActive = isActive && activeProvider === "transformers";
-        const isOllamaActive = isActive && activeProvider !== "transformers";
+        const isExtracting = extracting === m.name;
+        const isSwitching = switching === m.name;
+        const isBusy = isExtracting || isSwitching;
         return (
           <div
             key={m.name}
             className={`mm-model-row ${isActive ? "mm-model-row--active" : ""}`}
+            onClick={() => { if (!isBusy) onSwitch("ollama", m.name); }}
           >
             <span className="mm-model-row__check">{isActive ? "✓" : ""}</span>
             <span className="mm-model-row__name">{m.name}</span>
             <span className="mm-model-row__size">{m.size}</span>
             <div className="mm-model-row__actions">
-              <button
-                className={`mm-btn-sm mm-btn-sm--switch ${isOllamaActive ? "mm-btn-sm--active" : ""}`}
-                onClick={() => onSwitch("ollama", m.name)}
-                title="Load via Ollama (fast, prompt injection mode)"
+              <div
+                className={`mm-toggle ${isDirectActive ? "mm-toggle--on" : ""} ${!m.steering_compatible ? "mm-toggle--disabled" : ""} ${isBusy ? "mm-toggle--loading" : ""}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (m.steering_compatible && !isBusy && extracting === null && switching === null) {
+                    handleToggleSteering(m.name, m.vectors_cached, isDirectActive);
+                  }
+                }}
+                title={!m.steering_compatible
+                  ? "Steering not available for this architecture"
+                  : isExtracting
+                  ? "Extracting steering vectors..."
+                  : isSwitching
+                  ? "Loading model..."
+                  : isDirectActive
+                  ? "Click to switch to Ollama (prompt injection)"
+                  : "Click to enable Steering (direct LLM modification)"}
               >
-                {isOllamaActive ? "Active" : "Ollama"}
-              </button>
-              <button
-                className={`mm-btn-sm mm-btn-sm--steering ${isDirectActive ? "mm-btn-sm--active" : ""}`}
-                onClick={() => onSwitch("transformers", m.name)}
-                title="Load via Transformers (steering vectors + attention + prefix — uses more VRAM)"
-              >
-                {isDirectActive ? "Steering ✓" : "Steering"}
-              </button>
+                <span className="mm-toggle__label mm-toggle__label--left">Ollama</span>
+                <div className="mm-toggle__track">
+                  <div className={`mm-toggle__thumb ${isBusy ? "mm-toggle__thumb--loading" : ""}`} />
+                </div>
+                <span className={`mm-toggle__label mm-toggle__label--right ${isBusy ? "mm-toggle__label--loading" : ""}`}>
+                  {isExtracting ? "Extracting..." : isSwitching ? "Loading..." : "Steering"}
+                </span>
+              </div>
               <button
                 className="mm-model-row__delete"
                 onClick={(e) => { e.stopPropagation(); onDelete(m.name); }}

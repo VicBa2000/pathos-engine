@@ -126,7 +126,7 @@ Not just prompt injection. These systems modify the LLM's internal processing:
 | **Conditioning Tokens** | Trained tokens | Special tokens (`<V+3><A-1>`) learned via QLoRA fine-tuning |
 | **Emotional Adapter** | LoRA weights | QLoRA adapter that conditions response patterns on emotional state |
 
-**Dual-path**: local models get full steering + sampling + attention. Cloud APIs degrade gracefully to prompt injection + temperature.
+**Dual-path**: local models get full steering + sampling + attention via Ollama/Steering toggle in the Model Manager (compatible architectures: llama, qwen2/2.5, mistral, phi3, starcoder2). Cloud APIs degrade gracefully to prompt injection + temperature.
 
 ---
 
@@ -510,7 +510,7 @@ pathos/
       interoception.py         # Body state feedback into emotional state
       steering_extract.py      # CLI for offline steering vector extraction
     llm/
-      transformers_provider.py # Direct model access (HF/GGUF/local, steering-ready)
+      transformers_provider.py # Direct model access (HF safetensors, steering-ready)
     training/                  # QLoRA fine-tuning + dataset generation
     steering_data/             # Contrastive pairs + cached steering vectors
     sampling_data/             # Emotional + attention vocabulary (6+7 categories)
