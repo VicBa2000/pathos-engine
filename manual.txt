@@ -76,7 +76,7 @@ conscious sense. It is transparent about its functional nature.
 
 pathos/
 ├── src/pathos/                   # Python Backend
-│   ├── main.py                   # FastAPI app, 75 core endpoints, pipeline
+│   ├── main.py                   # FastAPI app, 77 core endpoints, pipeline
 │   ├── api_routes.py             # Emotion API as a Service (7 endpoints)
 │   ├── config.py                 # Settings (env vars, models)
 │   ├── engine/                   # Emotional logic (36 modules)
