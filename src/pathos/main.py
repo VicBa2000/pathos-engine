@@ -1991,7 +1991,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         dev_transition_event = attempt_transition(
             session.development,
             schemas_count=len(session.schemas.schemas),
-            episodic_count=len(session.autobiographical.episodic_store.episodes),
+            episodic_count=len(session.autobiographical.episodic.episodes),
             identities_count=len(session.narrative.identity_statements),
             crises_resolved=session.narrative.total_contradictions,
             turn_number=session.turn_count,
@@ -3163,7 +3163,7 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         attempt_transition(
             session.development,
             schemas_count=len(session.schemas.schemas),
-            episodic_count=len(session.autobiographical.episodic_store.episodes),
+            episodic_count=len(session.autobiographical.episodic.episodes),
             identities_count=len(session.narrative.identity_statements),
             crises_resolved=session.narrative.total_contradictions,
             turn_number=session.turn_count,
