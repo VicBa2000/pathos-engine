@@ -35,6 +35,64 @@ from pathos.engine.forecasting import (
     get_forecast_prompt,
     record_forecast,
 )
+from pathos.engine.predictive import (
+    PredictiveEngine,
+    compute_prediction_error,
+    decay_precision,
+    get_prediction_prompt,
+    prediction_error_to_emotion_modulation,
+    record_prediction,
+    update_precision,
+)
+from pathos.models.predictive import DemandType
+from pathos.engine.workspace import (
+    generate_candidate,
+    get_workspace_prompt,
+    process_workspace_turn,
+)
+from pathos.models.workspace import WorkspaceCandidate
+from pathos.engine.autobio_memory import (
+    get_autobiographical_details,
+    get_autobiographical_prompt,
+    process_autobiographical_turn,
+)
+from pathos.engine.dreaming import consolidate as dream_consolidate
+from pathos.engine.drives import (
+    attempt_goal_generation,
+    get_drives_details,
+    get_drives_prompt,
+    process_goals,
+    update_drives,
+)
+from pathos.engine.discovery import (
+    get_discovery_details,
+    get_discovery_prompt,
+    get_vocabulary,
+    process_discovery_turn,
+)
+from pathos.engine.phenomenology import (
+    get_phenomenology_details,
+    get_phenomenology_prompt,
+    get_qualia_history_summary,
+    process_phenomenology_turn,
+)
+from pathos.engine.development import (
+    apply_stage_modifiers,
+    attempt_transition,
+    approve_pending_transition,
+    filter_emotions_by_stage,
+    get_development_details,
+    get_development_prompt,
+    is_system_available,
+    track_experience,
+)
+from pathos.models.development import (
+    DevelopmentConfig,
+    DevelopmentSpeed,
+    DevelopmentStage,
+    DevelopmentState,
+    TransitionMode,
+)
 from pathos.engine.somatic import (
     compute_somatic_bias,
     evaluate_user_reaction,
@@ -119,6 +177,13 @@ from pathos.models.schemas import (
     CreativityDetails,
     EmotionGenerationDetails,
     ForecastingDetails,
+    PredictiveDetails,
+    WorkspaceDetails,
+    AutobiographicalDetails,
+    DevelopmentDetails,
+    DrivesDetails,
+    DiscoveryDetails,
+    PhenomenologyDetails,
     ImmuneDetails,
     VoiceDetails,
     NarrativeDetails,
@@ -165,6 +230,7 @@ settings = Settings()
 state_manager = StateManager()
 llm_provider: LLMProvider | None = None
 steering_engine: EmotionalSteeringEngine = EmotionalSteeringEngine()
+predictive_engine: PredictiveEngine = PredictiveEngine()
 _switch_model_lock = asyncio.Lock()
 download_manager = DownloadManager(settings.ollama_base_url)
 
@@ -634,6 +700,46 @@ async def chat(request: ChatRequest) -> ChatResponse:
         impact="medium" if has_temporal else "none",
     ))
 
+    # 0c. Predictive Processing — generate predictions BEFORE input [CORE]
+    t0 = time.perf_counter()
+    active_schemas_for_pred: list[tuple[str, str, float]] | None = None
+    if session.advanced_mode and session.schemas.schemas:
+        active_schemas_for_pred = [
+            (s.trigger_category, s.typical_emotion.value, s.reinforcement_strength)
+            for s in session.schemas.schemas
+            if s.reinforcement_strength > 0.3
+        ]
+    current_predictions = predictive_engine.generate_predictions(
+        predictive_state=session.predictive,
+        conversation_history=session.conversation,
+        user_model=session.user_model,
+        mood=session.emotional_state.mood,
+        emotional_state=session.emotional_state,
+        active_schemas=active_schemas_for_pred,
+    )
+    session.predictive.current_predictions = current_predictions
+    pred_dur = (time.perf_counter() - t0) * 1000
+    trace_steps.append(PipelineStep(
+        name="predictive_gen", label="Predictive Processing",
+        active=True, duration_ms=pred_dur,
+        summary=f"Predicted tone={current_predictions.content.expected_tone}, "
+                f"valence={current_predictions.emotion.expected_valence:+.2f}, "
+                f"demand={current_predictions.demand.expected_demand.value}"
+                if not current_predictions.is_cold_start
+                else "Cold start — no predictions yet (using 100% classical appraisal)",
+        impact="medium" if session.predictive.is_warm else "low",
+        details={
+            "predicted_tone": current_predictions.content.expected_tone,
+            "predicted_intent": current_predictions.content.expected_intent,
+            "predicted_valence": round(current_predictions.emotion.expected_valence, 4),
+            "predicted_arousal": round(current_predictions.emotion.expected_arousal, 4),
+            "predicted_demand": current_predictions.demand.expected_demand.value,
+            "avg_confidence": round(current_predictions.average_confidence, 4),
+            "predictive_weight": round(session.predictive.predictive_weight, 4),
+            "is_warm": session.predictive.is_warm,
+        },
+    ))
+
     # 1. Appraisal + Memory amplification
     t0 = time.perf_counter()
     if session.lite_mode:
@@ -691,84 +797,109 @@ async def chat(request: ChatRequest) -> ChatResponse:
     detected_a = 0.0
     signal_str = 0.0
 
+    # Helper: dev gate shortcut
+    _dev = session.development
+    # Raw/Extreme bypass development gating — all systems available
+    # Use a copy with enabled=False for is_system_available checks
+    _dev_gate = _dev
+    if _dev.enabled and (session.raw_mode or session.extreme_mode):
+        _dev_gate = _dev.model_copy(update={"enabled": False})
+    _dev_skip = f"Development: {_dev.current_stage.value}" if _dev.enabled and not session.raw_mode and not session.extreme_mode else ""
+
     if session.advanced_mode:
-        # 2b. Needs amplification
+        # 2b. Needs amplification [DEV: stage 2+]
         t0 = time.perf_counter()
-        needs_amp = compute_needs_amplification(session.needs, request.message)
-        trace_steps.append(PipelineStep(
-            name="needs", label="Psychological Needs",
-            active=True, duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Needs amplification: {needs_amp:+.2f}" if abs(needs_amp) > 0.01 else "No significant need activation",
-            impact="medium" if abs(needs_amp) > 0.05 else "low" if abs(needs_amp) > 0.01 else "none",
-            details={"amplification": round(needs_amp, 4), "connection": round(session.needs.connection, 3), "competence": round(session.needs.competence, 3), "autonomy": round(session.needs.autonomy, 3), "safety": round(session.needs.safety, 3)},
-        ))
+        if is_system_available(_dev_gate,"needs"):
+            needs_amp = compute_needs_amplification(session.needs, request.message)
+            trace_steps.append(PipelineStep(
+                name="needs", label="Psychological Needs",
+                active=True, duration_ms=(time.perf_counter() - t0) * 1000,
+                summary=f"Needs amplification: {needs_amp:+.2f}" if abs(needs_amp) > 0.01 else "No significant need activation",
+                impact="medium" if abs(needs_amp) > 0.05 else "low" if abs(needs_amp) > 0.01 else "none",
+                details={"amplification": round(needs_amp, 4), "connection": round(session.needs.connection, 3), "competence": round(session.needs.competence, 3), "autonomy": round(session.needs.autonomy, 3), "safety": round(session.needs.safety, 3)},
+            ))
+        else:
+            trace_steps.append(PipelineStep(name="needs", label="Psychological Needs", active=False, skipped_reason=_dev_skip))
 
-        # 2c. Schema priming
+        # 2c. Schema priming [DEV: stage 2+]
         t0 = time.perf_counter()
-        schema_hint, schema_amp = session.schemas.check_priming(request.message)
-        trace_steps.append(PipelineStep(
-            name="schemas", label="Emotional Schemas",
-            active=True, duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Schema primed: {schema_hint.value} ({schema_amp:+.2f})" if schema_hint else "No schema activated",
-            impact="high" if schema_hint else "none",
-            details={"primed_emotion": schema_hint.value if schema_hint else None, "amplification": round(schema_amp, 4), "schemas_count": len(session.schemas._schemas)},
-        ))
+        if is_system_available(_dev_gate,"schemas"):
+            schema_hint, schema_amp = session.schemas.check_priming(request.message)
+            trace_steps.append(PipelineStep(
+                name="schemas", label="Emotional Schemas",
+                active=True, duration_ms=(time.perf_counter() - t0) * 1000,
+                summary=f"Schema primed: {schema_hint.value} ({schema_amp:+.2f})" if schema_hint else "No schema activated",
+                impact="high" if schema_hint else "none",
+                details={"primed_emotion": schema_hint.value if schema_hint else None, "amplification": round(schema_amp, 4), "schemas_count": len(session.schemas._schemas)},
+            ))
+        else:
+            trace_steps.append(PipelineStep(name="schemas", label="Emotional Schemas", active=False, skipped_reason=_dev_skip))
 
-        # 2d. Social modulation
+        # 2d. Social modulation [DEV: stage 3+]
         t0 = time.perf_counter()
-        social_v_mod, social_i_mod = compute_social_modulation(session.user_model, compute_valence(appraisal_result.vector))
-        trace_steps.append(PipelineStep(
-            name="social", label="Social Cognition",
-            active=True, duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Rapport {session.user_model.rapport:.0%}, trust {session.user_model.trust_level:.0%}",
-            impact="medium" if abs(social_v_mod) > 0.05 else "low" if abs(social_v_mod) > 0.01 else "none",
-            details={"valence_mod": round(social_v_mod, 4), "intensity_mod": round(social_i_mod, 4), "rapport": round(session.user_model.rapport, 3), "trust": round(session.user_model.trust_level, 3)},
-        ))
+        if is_system_available(_dev_gate,"social"):
+            social_v_mod, social_i_mod = compute_social_modulation(session.user_model, compute_valence(appraisal_result.vector))
+            trace_steps.append(PipelineStep(
+                name="social", label="Social Cognition",
+                active=True, duration_ms=(time.perf_counter() - t0) * 1000,
+                summary=f"Rapport {session.user_model.rapport:.0%}, trust {session.user_model.trust_level:.0%}",
+                impact="medium" if abs(social_v_mod) > 0.05 else "low" if abs(social_v_mod) > 0.01 else "none",
+                details={"valence_mod": round(social_v_mod, 4), "intensity_mod": round(social_i_mod, 4), "rapport": round(session.user_model.rapport, 3), "trust": round(session.user_model.trust_level, 3)},
+            ))
+        else:
+            trace_steps.append(PipelineStep(name="social", label="Social Cognition", active=False, skipped_reason=_dev_skip))
 
-        # 2e. Emotion Contagion (pre-cognitive)
+        # 2e. Emotion Contagion (pre-cognitive) [DEV: stage 2+]
         t0 = time.perf_counter()
-        detected_v, detected_a, signal_str = detect_user_emotion(request.message)
-        session.shadow_state = update_shadow_state(session.shadow_state, detected_v, detected_a, signal_str)
-        contagion_v, contagion_a = compute_contagion_perturbation(
-            session.shadow_state, session.emotional_state.valence,
-            session.emotional_state.arousal, session.personality, session.user_model.rapport,
-        )
-        contagion_mag = abs(contagion_v) + abs(contagion_a)
-        trace_steps.append(PipelineStep(
-            name="contagion", label="Emotion Contagion",
-            active=True, duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Detected user emotion (v:{detected_v:+.2f}, a:{detected_a:.2f}), contagion applied" if signal_str > 0.1 else "No strong emotional signal detected from user",
-            impact="high" if contagion_mag > 0.1 else "medium" if contagion_mag > 0.03 else "low" if signal_str > 0.1 else "none",
-            details={"detected_valence": round(detected_v, 4), "detected_arousal": round(detected_a, 4), "signal_strength": round(signal_str, 4), "contagion_v": round(contagion_v, 4), "contagion_a": round(contagion_a, 4)},
-        ))
+        if is_system_available(_dev_gate,"contagion"):
+            detected_v, detected_a, signal_str = detect_user_emotion(request.message)
+            session.shadow_state = update_shadow_state(session.shadow_state, detected_v, detected_a, signal_str)
+            contagion_v, contagion_a = compute_contagion_perturbation(
+                session.shadow_state, session.emotional_state.valence,
+                session.emotional_state.arousal, session.personality, session.user_model.rapport,
+            )
+            contagion_mag = abs(contagion_v) + abs(contagion_a)
+            trace_steps.append(PipelineStep(
+                name="contagion", label="Emotion Contagion",
+                active=True, duration_ms=(time.perf_counter() - t0) * 1000,
+                summary=f"Detected user emotion (v:{detected_v:+.2f}, a:{detected_a:.2f}), contagion applied" if signal_str > 0.1 else "No strong emotional signal detected from user",
+                impact="high" if contagion_mag > 0.1 else "medium" if contagion_mag > 0.03 else "low" if signal_str > 0.1 else "none",
+                details={"detected_valence": round(detected_v, 4), "detected_arousal": round(detected_a, 4), "signal_strength": round(signal_str, 4), "contagion_v": round(contagion_v, 4), "contagion_a": round(contagion_a, 4)},
+            ))
+        else:
+            trace_steps.append(PipelineStep(name="contagion", label="Emotion Contagion", active=False, skipped_reason=_dev_skip))
 
-        # 2f. Somatic Markers (pre-rational gut feeling)
+        # 2f. Somatic Markers (pre-rational gut feeling) [DEV: stage 4+]
         t0 = time.perf_counter()
-        session.somatic_markers = evaluate_user_reaction(
-            session.somatic_markers, detected_v, session.turn_count,
-        )
-        somatic_bias, gut_feeling = compute_somatic_bias(session.somatic_markers, request.message)
-        trace_steps.append(PipelineStep(
-            name="somatic", label="Somatic Markers",
-            active=True, duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Gut feeling: {gut_feeling} (bias: {somatic_bias:+.2f})" if gut_feeling else "No somatic marker triggered",
-            impact="medium" if abs(somatic_bias) > 0.05 else "low" if gut_feeling else "none",
-            details={"bias": round(somatic_bias, 4), "gut_feeling": gut_feeling, "markers_count": len(session.somatic_markers.markers)},
-        ))
+        if is_system_available(_dev_gate,"somatic"):
+            session.somatic_markers = evaluate_user_reaction(
+                session.somatic_markers, detected_v, session.turn_count,
+            )
+            somatic_bias, gut_feeling = compute_somatic_bias(session.somatic_markers, request.message)
+            trace_steps.append(PipelineStep(
+                name="somatic", label="Somatic Markers",
+                active=True, duration_ms=(time.perf_counter() - t0) * 1000,
+                summary=f"Gut feeling: {gut_feeling} (bias: {somatic_bias:+.2f})" if gut_feeling else "No somatic marker triggered",
+                impact="medium" if abs(somatic_bias) > 0.05 else "low" if gut_feeling else "none",
+                details={"bias": round(somatic_bias, 4), "gut_feeling": gut_feeling, "markers_count": len(session.somatic_markers.markers)},
+            ))
+        else:
+            trace_steps.append(PipelineStep(name="somatic", label="Somatic Markers", active=False, skipped_reason=_dev_skip))
 
-        # 2g. Emotional Forecasting: evaluate previous forecast (if enabled)
+        # 2g. Emotional Forecasting: evaluate previous forecast (if enabled) [DEV: stage 3+]
         t0 = time.perf_counter()
-        if session.forecast.enabled and session.turn_count > 1:
+        if is_system_available(_dev_gate,"forecasting") and session.forecast.enabled and session.turn_count > 1:
             session.forecast = evaluate_forecast(
                 session.forecast, detected_v, detected_a, session.turn_count,
             )
+        _forecast_active = is_system_available(_dev_gate,"forecasting") and session.forecast.enabled and session.turn_count > 1
         trace_steps.append(PipelineStep(
             name="forecast_eval", label="Forecast Evaluation",
-            active=session.forecast.enabled and session.turn_count > 1,
-            skipped_reason="" if session.forecast.enabled else "Forecasting disabled",
+            active=_forecast_active,
+            skipped_reason="" if is_system_available(_dev_gate,"forecasting") else _dev_skip,
             duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Previous forecast accuracy: {session.forecast.accuracy_score:.0%}" if session.forecast.enabled else "",
-            impact="low" if session.forecast.enabled else "none",
+            summary=f"Previous forecast accuracy: {session.forecast.accuracy_score:.0%}" if _forecast_active else "",
+            impact="low" if _forecast_active else "none",
         ))
     else:
         # Add skipped steps for non-advanced mode
@@ -777,13 +908,227 @@ async def chat(request: ChatRequest) -> ChatResponse:
                             ("somatic", "Somatic Markers"), ("forecast_eval", "Forecast Evaluation")]:
             trace_steps.append(PipelineStep(name=name, label=label, active=False, skipped_reason="Advanced mode off"))
 
-    # 2h. External signals (from session config — only active sources)
+    # 2i. Predictive Processing — compute prediction error [CORE]
+    t0 = time.perf_counter()
+    prediction_error = None
+    prediction_prompt_text: str | None = None
+    if current_predictions is not None:
+        # Detect intent from appraisal for error computation
+        _detected_intent = "unknown"
+        if appraisal_result.emotion_hint:
+            hint_val = appraisal_result.emotion_hint.value
+            if hint_val in ("anger", "frustration"):
+                _detected_intent = "complaint"
+            elif hint_val in ("gratitude", "joy"):
+                _detected_intent = "greeting"
+            elif hint_val in ("fear", "anxiety"):
+                _detected_intent = "emotional_expression"
+            elif hint_val == "surprise":
+                _detected_intent = "topic_change"
+
+        # Map appraisal hint to demand type
+        _detected_demand: DemandType | None = None
+        if "?" in request.message:
+            _detected_demand = DemandType.HELP
+        elif appraisal_result.emotion_hint and appraisal_result.emotion_hint.value in (
+            "sadness", "fear", "anxiety", "helplessness",
+        ):
+            _detected_demand = DemandType.EMOTIONAL
+
+        prediction_error = compute_prediction_error(
+            predictions=current_predictions,
+            actual_stimulus=request.message,
+            detected_user_valence=detected_v if session.advanced_mode else 0.0,
+            detected_user_arousal=detected_a if session.advanced_mode else 0.3,
+            detected_intent=_detected_intent,
+            detected_demand=_detected_demand,
+        )
+
+        # Update bayesian precision
+        session.predictive = update_precision(session.predictive, prediction_error)
+
+        # Record prediction + error in history
+        session.predictive = record_prediction(
+            session.predictive, current_predictions, prediction_error,
+        )
+
+        # Apply precision decay (1 turn)
+        session.predictive = decay_precision(session.predictive, elapsed_turns=1)
+
+        # Generate prompt for behavior modifier
+        prediction_prompt_text = get_prediction_prompt(prediction_error, session.predictive)
+
+    pred_error_dur = (time.perf_counter() - t0) * 1000
+    trace_steps.append(PipelineStep(
+        name="predictive_error", label="Prediction Error",
+        active=prediction_error is not None,
+        duration_ms=pred_error_dur,
+        summary=(
+            f"Surprise: {prediction_error.surprise_type.value} "
+            f"(error={prediction_error.total_error:.2f}, "
+            f"vulnerability={prediction_error.vulnerability:.2f})"
+            if prediction_error and prediction_error.surprise_type.value != "none"
+            else "Prediction correct — no surprise"
+        ) if prediction_error else "No predictions to evaluate",
+        impact=(
+            "high" if prediction_error and prediction_error.vulnerability > 0.3
+            else "medium" if prediction_error and prediction_error.total_error > 0.2
+            else "low"
+        ) if prediction_error else "none",
+        details={
+            "content_error": round(prediction_error.content_error, 4),
+            "emotion_error": round(prediction_error.emotion_error, 4),
+            "demand_error": round(prediction_error.demand_error, 4),
+            "total_error": round(prediction_error.total_error, 4),
+            "surprise_type": prediction_error.surprise_type.value,
+            "valence_direction": round(prediction_error.valence_direction, 4),
+            "vulnerability": round(prediction_error.vulnerability, 4),
+            "content_precision": round(session.predictive.content_precision, 4),
+            "emotion_precision": round(session.predictive.emotion_precision, 4),
+            "demand_precision": round(session.predictive.demand_precision, 4),
+            "predictive_weight": round(session.predictive.predictive_weight, 4),
+        } if prediction_error else {},
+    ))
+
+    # 2k. Global Workspace — consciousness competition [TOGGLEABLE]
+    t0 = time.perf_counter()
+    workspace_prompt_text: str | None = None
+    autobiographical_prompt_text: str | None = None
+    if session.consciousness.enabled and session.advanced_mode and is_system_available(_dev_gate,"workspace"):
+        # Generate candidates from pipeline data
+        ws_candidates: list[WorkspaceCandidate] = []
+        # Appraisal candidate
+        if appraisal_result.emotion_hint:
+            hint_str_ws = appraisal_result.emotion_hint.value
+            ws_candidates.append(generate_candidate(
+                source="appraisal",
+                content=f"Stimulus evaluated as {hint_str_ws}",
+                urgency=0.7 if abs(compute_valence(appraisal_result.vector)) > 0.3 else 0.4,
+                relevance=appraisal_result.vector.relevance.personal_significance,
+                emotional_intensity=abs(compute_valence(appraisal_result.vector)),
+                emotion_tag=hint_str_ws,
+                category="stimulus",
+            ))
+        # Schema candidate
+        if schema_hint:
+            ws_candidates.append(generate_candidate(
+                source="schema",
+                content=f"Pattern activated: {schema_hint.value} (amp={schema_amp:.2f})",
+                urgency=0.5 + schema_amp * 0.3,
+                relevance=0.7 if schema_amp > 0.1 else 0.3,
+                emotional_intensity=schema_amp,
+                emotion_tag=schema_hint.value,
+                category="pattern",
+            ))
+        # Contagion candidate
+        if signal_str > 0.15:
+            ws_candidates.append(generate_candidate(
+                source="contagion",
+                content=f"Absorbing user emotion (v={detected_v:+.2f}, a={detected_a:.2f})",
+                urgency=signal_str * 0.6,
+                relevance=signal_str,
+                emotional_intensity=abs(detected_v) * 0.8 + detected_a * 0.2,
+                emotion_tag="anxiety" if detected_v < -0.2 else "joy" if detected_v > 0.2 else "neutral",
+                category="social",
+            ))
+        # Somatic candidate
+        if gut_feeling:
+            ws_candidates.append(generate_candidate(
+                source="somatic",
+                content=f"Gut feeling: {gut_feeling} (bias={somatic_bias:+.2f})",
+                urgency=abs(somatic_bias) * 0.8,
+                relevance=0.5,
+                emotional_intensity=abs(somatic_bias),
+                category="body",
+            ))
+        # Predictive surprise candidate
+        if prediction_error and prediction_error.surprise_type.value != "none":
+            ws_candidates.append(generate_candidate(
+                source="predictive",
+                content=f"Surprise {prediction_error.surprise_type.value} (error={prediction_error.total_error:.2f})",
+                urgency=prediction_error.vulnerability * 0.9,
+                relevance=0.8,
+                emotional_intensity=prediction_error.total_error,
+                emotion_tag="surprise" if prediction_error.surprise_type.value == "neutral"
+                    else "disappointment" if prediction_error.surprise_type.value == "negative"
+                    else "relief",
+                category="prediction",
+            ))
+        # Needs candidate (if high need)
+        if needs_amp > 0.1:
+            ws_candidates.append(generate_candidate(
+                source="needs",
+                content=f"Unmet need amplification: {needs_amp:+.2f}",
+                urgency=needs_amp * 0.7,
+                relevance=0.5,
+                emotional_intensity=needs_amp,
+                category="needs",
+            ))
+
+        session.consciousness = process_workspace_turn(session.consciousness, ws_candidates, raw_mode=session.raw_mode, extreme_mode=session.extreme_mode)
+        if session.consciousness.current_result:
+            workspace_prompt_text = get_workspace_prompt(session.consciousness.current_result)
+
+    ws_active = session.consciousness.enabled and session.advanced_mode and is_system_available(_dev_gate,"workspace")
+    ws_result = session.consciousness.current_result
+    trace_steps.append(PipelineStep(
+        name="workspace", label="Global Workspace",
+        active=ws_active,
+        skipped_reason="" if ws_active else ("Workspace disabled" if not session.consciousness.enabled else "Advanced mode off"),
+        duration_ms=(time.perf_counter() - t0) * 1000,
+        summary=(
+            f"Conscious: {len(ws_result.conscious)}/{ws_result.total_candidates}, "
+            f"integration={ws_result.integration_score:.2f}, "
+            f"stability={ws_result.workspace_stability:.2f}"
+            if ws_result else "Workspace inactive"
+        ),
+        impact="high" if ws_result and ws_result.integration_score < 0.3 else "medium" if ws_active else "none",
+        details={
+            "conscious_sources": [c.source for c in ws_result.conscious],
+            "preconscious_count": len(ws_result.preconscious),
+            "coalitions_formed": ws_result.coalitions_formed,
+            "integration_score": ws_result.integration_score,
+            "workspace_stability": ws_result.workspace_stability,
+            "total_candidates": ws_result.total_candidates,
+            "filtered_noise": ws_result.filtered_noise,
+            "preconscious_mood_v": round(session.consciousness.preconscious.mood_valence_contribution, 4),
+            "preconscious_tension": round(session.consciousness.preconscious.somatic_tension_echo, 4),
+        } if ws_result else {},
+    ))
+
+    # 2m. Autobiographical Memory — prompt from existing memories [OPT-IN]
+    autobiographical_prompt_text = get_autobiographical_prompt(session.autobiographical)
+
+    # 2n. Development — prompt from current stage [TOGGLEABLE]
+    development_prompt_text = get_development_prompt(session.development)
+
+    # 2o. Drives — update drives + process goals + generate new goals [TOGGLEABLE]
+    drives_updates: list = []
+    drives_impacts: list = []
+    if is_system_available(session.development, "drives"):
+        session.drives, drives_updates = update_drives(
+            session.drives, request.message, session.personality,
+            session.turn_count, getattr(session.user_model, 'rapport', 0.5),
+        )
+        session.drives, drives_impacts = process_goals(
+            session.drives, request.message, session.turn_count,
+        )
+        session.drives = attempt_goal_generation(
+            session.drives, request.message, session.turn_count,
+        )
+    drives_prompt_text = get_drives_prompt(session.drives, raw_mode=session.raw_mode, extreme_mode=session.extreme_mode)
+
+    # 2l. External signals (from session config — only active sources)
     sig_v, sig_a, sig_d, perception_text = _get_session_signals(session)
 
     # 3. Emotion Generation
     t0 = time.perf_counter()
     snap_before = _snap(session.emotional_state)
     effective_hint = schema_hint if schema_hint and not appraisal_result.emotion_hint else appraisal_result.emotion_hint
+    pred_modulation = prediction_error_to_emotion_modulation(
+        prediction_error, session.predictive.predictive_weight,
+        raw_mode=session.raw_mode, extreme_mode=session.extreme_mode,
+    )
     new_state = generate_emotion(
         appraisal=appraisal_result.vector,
         current_state=session.emotional_state,
@@ -797,7 +1142,27 @@ async def chat(request: ChatRequest) -> ChatResponse:
         contagion_valence=contagion_v,
         contagion_arousal=contagion_a + sig_a,
         coupling=session.coupling if session.advanced_mode else None,
+        predictive_modulation=pred_modulation,
     )
+    # 3a. Development emotion filtering [TOGGLEABLE]
+    # Raw/Extreme bypass gating — all emotions available (adult expression)
+    if _dev.enabled and new_state.emotional_stack and not session.raw_mode and not session.extreme_mode:
+        new_state.emotional_stack = filter_emotions_by_stage(_dev, new_state.emotional_stack)
+        # Clamp primary/secondary to available emotions
+        if not is_emotion_available(_dev, new_state.primary_emotion.value):
+            # Find highest-activation available emotion from the filtered stack
+            _avail_emos = [(e, a) for e, a in new_state.emotional_stack.items() if is_emotion_available(_dev, e)]
+            if _avail_emos:
+                _best = max(_avail_emos, key=lambda x: x[1])
+                try:
+                    new_state.primary_emotion = PrimaryEmotion(_best[0])
+                except ValueError:
+                    pass
+        if new_state.secondary_emotion and not is_emotion_available(_dev, new_state.secondary_emotion.value):
+            new_state.secondary_emotion = None
+        # Apply stage-specific body/intensity modifiers
+        apply_stage_modifiers(_dev, new_state)
+
     snap_after = _snap(new_state)
     d = _delta(snap_before, snap_after)
     trace_steps.append(PipelineStep(
@@ -846,7 +1211,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     forecast_info: str | None = None
 
     if session.advanced_mode:
-        # 4. Reappraisal (multi-pass) — BYPASSED in extreme mode
+        # 4. Reappraisal (multi-pass) — BYPASSED in extreme mode [DEV: stage 4+]
         t0 = time.perf_counter()
         if session.extreme_mode:
             trace_steps.append(PipelineStep(
@@ -854,6 +1219,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 active=False, skipped_reason="Extreme mode: no cognitive softening",
                 duration_ms=(time.perf_counter() - t0) * 1000,
             ))
+        elif not is_system_available(_dev_gate,"reappraisal"):
+            trace_steps.append(PipelineStep(name="reappraisal", label="Cognitive Reappraisal", active=False, skipped_reason=_dev_skip))
         else:
             snap_before = _snap(new_state)
             new_state, reappraisal_result = reappraise(new_state, session.regulator.regulation_capacity)
@@ -867,7 +1234,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 details={"applied": reappraisal_result.applied if reappraisal_result else False, "strategy": reappraisal_result.strategy if reappraisal_result and reappraisal_result.applied else None},
             ))
 
-        # 5. Active regulation — BYPASSED in extreme mode
+        # 5. Active regulation — BYPASSED in extreme mode [DEV: stage 3+]
         t0 = time.perf_counter()
         if session.extreme_mode:
             trace_steps.append(PipelineStep(
@@ -875,6 +1242,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 active=False, skipped_reason="Extreme mode: no emotional dampening",
                 duration_ms=(time.perf_counter() - t0) * 1000,
             ))
+        elif not is_system_available(_dev_gate,"regulation"):
+            trace_steps.append(PipelineStep(name="regulation", label="Active Regulation", active=False, skipped_reason=_dev_skip))
         else:
             snap_before = _snap(new_state)
             new_state, regulation_result = session.regulator.regulate(
@@ -892,24 +1261,27 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 details={"strategy": regulation_result.strategy_used, "intensity_reduced": round(regulation_result.intensity_reduced, 4), "capacity": round(session.regulator.regulation_capacity, 3), "breakthrough": regulation_result.breakthrough},
             ))
 
-        # 6. Temporal effects (rumination/savoring)
+        # 6. Temporal effects (rumination/savoring) [DEV: stage 3+]
         t0 = time.perf_counter()
-        snap_before = _snap(new_state)
-        new_state = session.temporal.apply_temporal_effects(new_state, temporal_result)
-        snap_after = _snap(new_state)
-        d = _delta(snap_before, snap_after)
-        active_effects = []
-        if session.temporal._ruminations: active_effects.append("rumination")
-        if session.temporal._savorings: active_effects.append("savoring")
-        if session.temporal._topic_history: active_effects.append("anticipation")
-        trace_steps.append(PipelineStep(
-            name="temporal", label="Temporal Dynamics",
-            active=True, duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Active: {', '.join(active_effects)}" if active_effects else "No temporal effects active",
-            impact=_impact(d), delta=d,
-        ))
+        if is_system_available(_dev_gate,"temporal"):
+            snap_before = _snap(new_state)
+            new_state = session.temporal.apply_temporal_effects(new_state, temporal_result)
+            snap_after = _snap(new_state)
+            d = _delta(snap_before, snap_after)
+            active_effects = []
+            if session.temporal._ruminations: active_effects.append("rumination")
+            if session.temporal._savorings: active_effects.append("savoring")
+            if session.temporal._topic_history: active_effects.append("anticipation")
+            trace_steps.append(PipelineStep(
+                name="temporal", label="Temporal Dynamics",
+                active=True, duration_ms=(time.perf_counter() - t0) * 1000,
+                summary=f"Active: {', '.join(active_effects)}" if active_effects else "No temporal effects active",
+                impact=_impact(d), delta=d,
+            ))
+        else:
+            trace_steps.append(PipelineStep(name="temporal", label="Temporal Dynamics", active=False, skipped_reason=_dev_skip))
 
-        # 6b. Emotional Immune System — BYPASSED in extreme mode
+        # 6b. Emotional Immune System — BYPASSED in extreme mode [DEV: stage 4+]
         t0 = time.perf_counter()
         if session.extreme_mode:
             trace_steps.append(PipelineStep(
@@ -917,6 +1289,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 active=False, skipped_reason="Extreme mode: no emotional protection",
                 duration_ms=(time.perf_counter() - t0) * 1000,
             ))
+        elif not is_system_available(_dev_gate,"immune"):
+            trace_steps.append(PipelineStep(name="immune", label="Emotional Immune System", active=False, skipped_reason=_dev_skip))
         else:
             snap_before = _snap(new_state)
             session.immune = update_immune_state(session.immune, new_state, request.message)
@@ -932,55 +1306,62 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 details={"mode": session.immune.protection_mode.value, "strength": round(session.immune.protection_strength, 3), "negative_streak": session.immune.negative_streak},
             ))
 
-        # 6c. Narrative Self (identity coherence + effects)
+        # 6c. Narrative Self (identity coherence + effects) [DEV: stage 4+]
         t0 = time.perf_counter()
-        snap_before = _snap(new_state)
-        coherence_delta, is_coherent = check_coherence(
-            session.narrative, request.message, new_state.primary_emotion,
-        )
-        new_state = apply_narrative_effects(
-            new_state, coherence_delta, is_coherent, session.narrative.crisis.active,
-        )
-        session.narrative = detect_crisis(session.narrative, session.turn_count)
-        narrative_info = get_narrative_prompt(session.narrative)
-        snap_after = _snap(new_state)
-        d = _delta(snap_before, snap_after)
-        trace_steps.append(PipelineStep(
-            name="narrative", label="Narrative Self",
-            active=True, duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Identity {'coherent' if is_coherent else 'challenged'}, coherence: {session.narrative.coherence_score:.0%}" + (", CRISIS" if session.narrative.crisis.active else ""),
-            impact=_impact(d), delta=d,
-            details={"coherent": is_coherent, "coherence_score": round(session.narrative.coherence_score, 3), "crisis": session.narrative.crisis.active},
-        ))
-
-        # 7. Meta-emotion
-        t0 = time.perf_counter()
-        is_new_emotion = new_state.primary_emotion != previous_state.primary_emotion
-        meta_emotion = generate_meta_emotion(
-            new_state, previous_state, session.value_system,
-            regulation_success=regulation_result.strategy_used is not None and not regulation_result.breakthrough,
-            is_new_emotion=is_new_emotion,
-        )
-        trace_steps.append(PipelineStep(
-            name="meta_emotion", label="Meta-Emotion",
-            active=True, duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Feeling {meta_emotion.meta_response} about {meta_emotion.target_emotion.value}" if meta_emotion else "No meta-emotional response",
-            impact="medium" if meta_emotion else "none",
-            details={"active": meta_emotion is not None, "target": meta_emotion.target_emotion.value if meta_emotion else None, "response": meta_emotion.meta_response if meta_emotion else None, "intensity": round(meta_emotion.intensity, 3) if meta_emotion else 0},
-        ))
-
-        # 7b. Self-Initiated Inquiry
-        self_inquiry = check_self_inquiry(
-            new_state, previous_state, meta_emotion, regulation_result, session.turn_count,
-        )
-        if self_inquiry:
+        if is_system_available(_dev_gate,"narrative"):
+            snap_before = _snap(new_state)
+            coherence_delta, is_coherent = check_coherence(
+                session.narrative, request.message, new_state.primary_emotion,
+            )
+            new_state = apply_narrative_effects(
+                new_state, coherence_delta, is_coherent, session.narrative.crisis.active,
+            )
+            session.narrative = detect_crisis(session.narrative, session.turn_count)
+            narrative_info = get_narrative_prompt(session.narrative)
+            snap_after = _snap(new_state)
+            d = _delta(snap_before, snap_after)
             trace_steps.append(PipelineStep(
-                name="self_inquiry", label="Self-Initiated Inquiry",
-                active=True, duration_ms=0,
-                summary=f"[{self_inquiry.trigger.value}] {self_inquiry.inquiry_text[:80]}",
-                impact="high" if self_inquiry.intensity > 0.5 else "medium",
-                details={"trigger": self_inquiry.trigger.value, "intensity": round(self_inquiry.intensity, 3), "behavior": self_inquiry.suggested_behavior.value},
+                name="narrative", label="Narrative Self",
+                active=True, duration_ms=(time.perf_counter() - t0) * 1000,
+                summary=f"Identity {'coherent' if is_coherent else 'challenged'}, coherence: {session.narrative.coherence_score:.0%}" + (", CRISIS" if session.narrative.crisis.active else ""),
+                impact=_impact(d), delta=d,
+                details={"coherent": is_coherent, "coherence_score": round(session.narrative.coherence_score, 3), "crisis": session.narrative.crisis.active},
             ))
+        else:
+            trace_steps.append(PipelineStep(name="narrative", label="Narrative Self", active=False, skipped_reason=_dev_skip))
+
+        # 7. Meta-emotion [DEV: stage 3+]
+        t0 = time.perf_counter()
+        if is_system_available(_dev_gate,"meta_emotion"):
+            is_new_emotion = new_state.primary_emotion != previous_state.primary_emotion
+            meta_emotion = generate_meta_emotion(
+                new_state, previous_state, session.value_system,
+                regulation_success=regulation_result.strategy_used is not None and not regulation_result.breakthrough,
+                is_new_emotion=is_new_emotion,
+            )
+            trace_steps.append(PipelineStep(
+                name="meta_emotion", label="Meta-Emotion",
+                active=True, duration_ms=(time.perf_counter() - t0) * 1000,
+                summary=f"Feeling {meta_emotion.meta_response} about {meta_emotion.target_emotion.value}" if meta_emotion else "No meta-emotional response",
+                impact="medium" if meta_emotion else "none",
+                details={"active": meta_emotion is not None, "target": meta_emotion.target_emotion.value if meta_emotion else None, "response": meta_emotion.meta_response if meta_emotion else None, "intensity": round(meta_emotion.intensity, 3) if meta_emotion else 0},
+            ))
+        else:
+            trace_steps.append(PipelineStep(name="meta_emotion", label="Meta-Emotion", active=False, skipped_reason=_dev_skip))
+
+        # 7b. Self-Initiated Inquiry [DEV: stage 3+]
+        if is_system_available(_dev_gate,"self_inquiry"):
+            self_inquiry = check_self_inquiry(
+                new_state, previous_state, meta_emotion, regulation_result, session.turn_count,
+            )
+            if self_inquiry:
+                trace_steps.append(PipelineStep(
+                    name="self_inquiry", label="Self-Initiated Inquiry",
+                    active=True, duration_ms=0,
+                    summary=f"[{self_inquiry.trigger.value}] {self_inquiry.inquiry_text[:80]}",
+                    impact="high" if self_inquiry.intensity > 0.5 else "medium",
+                    details={"trigger": self_inquiry.trigger.value, "intensity": round(self_inquiry.intensity, 3), "behavior": self_inquiry.suggested_behavior.value},
+                ))
 
         # 8. Emergent emotions
         t0 = time.perf_counter()
@@ -993,20 +1374,23 @@ async def chat(request: ChatRequest) -> ChatResponse:
             details={"emergent_emotions": emergent},
         ))
 
-        # 8b. Emotional Creativity
+        # 8b. Emotional Creativity [DEV: stage 4+]
         t0 = time.perf_counter()
-        creativity_state = compute_creativity(new_state)
-        trace_steps.append(PipelineStep(
-            name="creativity", label="Emotional Creativity",
-            active=True, duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Mode: {creativity_state.thinking_mode}, level: {creativity_state.creativity_level:.0%}",
-            impact="medium" if creativity_state.creativity_level > 0.3 else "low" if creativity_state.creativity_level > 0.1 else "none",
-            details={"mode": creativity_state.thinking_mode, "level": round(creativity_state.creativity_level, 3), "temp_mod": round(creativity_state.temperature_modifier, 3)},
-        ))
+        if is_system_available(_dev_gate,"creativity"):
+            creativity_state = compute_creativity(new_state)
+            trace_steps.append(PipelineStep(
+                name="creativity", label="Emotional Creativity",
+                active=True, duration_ms=(time.perf_counter() - t0) * 1000,
+                summary=f"Mode: {creativity_state.thinking_mode}, level: {creativity_state.creativity_level:.0%}",
+                impact="medium" if creativity_state.creativity_level > 0.3 else "low" if creativity_state.creativity_level > 0.1 else "none",
+                details={"mode": creativity_state.thinking_mode, "level": round(creativity_state.creativity_level, 3), "temp_mod": round(creativity_state.temperature_modifier, 3)},
+            ))
+        else:
+            trace_steps.append(PipelineStep(name="creativity", label="Emotional Creativity", active=False, skipped_reason=_dev_skip))
 
-        # 8c. Emotional Forecasting (optional — only if enabled)
+        # 8c. Emotional Forecasting (optional — only if enabled) [DEV: stage 3+]
         t0 = time.perf_counter()
-        if session.forecast.enabled:
+        if is_system_available(_dev_gate,"forecasting") and session.forecast.enabled:
             user_emotion_est = estimate_user_emotion(
                 session.shadow_state, session.user_model,
                 detected_v, detected_a, signal_str,
@@ -1018,13 +1402,14 @@ async def chat(request: ChatRequest) -> ChatResponse:
             )
             session.forecast = record_forecast(session.forecast, forecast_result, session.turn_count)
             forecast_info = get_forecast_prompt(forecast_result)
+        _fcast_active = is_system_available(_dev_gate,"forecasting") and session.forecast.enabled
         trace_steps.append(PipelineStep(
             name="forecasting", label="Emotional Forecasting",
-            active=session.forecast.enabled,
-            skipped_reason="" if session.forecast.enabled else "Forecasting disabled",
+            active=_fcast_active,
+            skipped_reason="" if is_system_available(_dev_gate,"forecasting") else _dev_skip,
             duration_ms=(time.perf_counter() - t0) * 1000,
-            summary=f"Predicted user impact: {session.forecast.predicted_impact:.2f}" if session.forecast.enabled else "",
-            impact="medium" if session.forecast.enabled and getattr(session.forecast, 'risk_flag', False) else "low" if session.forecast.enabled else "none",
+            summary=f"Predicted user impact: {session.forecast.predicted_impact:.2f}" if _fcast_active else "",
+            impact="medium" if _fcast_active and getattr(session.forecast, 'risk_flag', False) else "low" if _fcast_active else "none",
         ))
     else:
         # Add skipped steps for non-advanced mode
@@ -1043,33 +1428,79 @@ async def chat(request: ChatRequest) -> ChatResponse:
     asyncio.create_task(session.memory.store(request.message, new_state, llm=mem_llm))
 
     if session.advanced_mode:
-        session.needs = update_needs(session.needs, request.message, appraisal_result.vector)
-        session.user_model = update_user_model(
-            session.user_model, request.message, appraisal_result.vector, new_state,
-        )
-        session.schemas.record_pattern(request.message, new_state.primary_emotion, new_state.intensity)
-        session.temporal.process_post_turn(request.message, new_state, previous_state)
+        if is_system_available(_dev_gate,"needs"):
+            session.needs = update_needs(session.needs, request.message, appraisal_result.vector)
+        if is_system_available(_dev_gate,"social"):
+            session.user_model = update_user_model(
+                session.user_model, request.message, appraisal_result.vector, new_state,
+            )
+        if is_system_available(_dev_gate,"schemas"):
+            session.schemas.record_pattern(request.message, new_state.primary_emotion, new_state.intensity)
+        if is_system_available(_dev_gate,"temporal"):
+            session.temporal.process_post_turn(request.message, new_state, previous_state)
 
-        # 9b. Narrative Self: update + growth + decay
-        session.narrative = update_narrative(
-            session.narrative, session.narrative_tracker,
-            request.message, new_state.primary_emotion, new_state.intensity,
-            session.turn_count,
-        )
-        session.narrative = process_growth(
-            session.narrative, request.message,
-            previous_state.primary_emotion, new_state.primary_emotion,
-            new_state.intensity,
-            regulation_success=regulation_result.strategy_used is not None and not regulation_result.breakthrough,
-            turn=session.turn_count,
-        )
-        session.narrative = decay_crisis_counter(session.narrative)
+        # 9b. Narrative Self: update + growth + decay [DEV: stage 4+]
+        if is_system_available(_dev_gate,"narrative"):
+            session.narrative = update_narrative(
+                session.narrative, session.narrative_tracker,
+                request.message, new_state.primary_emotion, new_state.intensity,
+                session.turn_count,
+            )
+            session.narrative = process_growth(
+                session.narrative, request.message,
+                previous_state.primary_emotion, new_state.primary_emotion,
+                new_state.intensity,
+                regulation_success=regulation_result.strategy_used is not None and not regulation_result.breakthrough,
+                turn=session.turn_count,
+            )
+            session.narrative = decay_crisis_counter(session.narrative)
     trace_steps.append(PipelineStep(
         name="post_processing", label="Post-Processing",
         active=True, duration_ms=(time.perf_counter() - t0) * 1000,
         summary="Updated memory, needs, social model, schemas, narrative" if session.advanced_mode else "Stored memory",
         impact="low",
     ))
+
+    # 9b. Emotional Discovery — detect novel states [TOGGLEABLE, DEV: stage 5]
+    novel_detected = False
+    if is_system_available(session.development, "discovery"):
+        prev_count = session.discovery.total_novel_detected
+        session.discovery = process_discovery_turn(
+            session.discovery,
+            valence=new_state.valence,
+            arousal=new_state.arousal,
+            dominance=new_state.dominance,
+            certainty=new_state.certainty,
+            intensity=new_state.intensity,
+            stimulus=request.message,
+            turn=session.turn_count,
+            body_tension=new_state.body_state.tension,
+            body_energy=new_state.body_state.energy,
+            body_openness=new_state.body_state.openness,
+            body_warmth=new_state.body_state.warmth,
+            raw_mode=session.raw_mode,
+            extreme_mode=session.extreme_mode,
+        )
+        novel_detected = session.discovery.total_novel_detected > prev_count
+    discovery_prompt_text = get_discovery_prompt(session.discovery)
+
+    # 9c. Phenomenology — generate qualia profile [TOGGLEABLE, DEV: stage 5]
+    if session.phenomenology.enabled and is_system_available(session.development, "phenomenology"):
+        pheno_mode = "extreme" if session.extreme_mode else ("raw" if session.raw_mode else "normal")
+        process_phenomenology_turn(
+            session.phenomenology,
+            emotion_name=new_state.primary_emotion.value,
+            valence=new_state.valence,
+            arousal=new_state.arousal,
+            dominance=new_state.dominance,
+            certainty=new_state.certainty,
+            intensity=new_state.intensity,
+            body_tension=new_state.body_state.tension,
+            body_warmth=new_state.body_state.warmth,
+            turn=session.turn_count,
+            mode=pheno_mode,
+        )
+    phenomenology_prompt_text = get_phenomenology_prompt(session.phenomenology)
 
     # 10. Behavior Modifier (raw / full / simple)
     t0 = time.perf_counter()
@@ -1085,6 +1516,13 @@ async def chat(request: ChatRequest) -> ChatResponse:
             gut_feeling=gut_feeling,
             creativity=creativity_state,
             immune_info=immune_info,
+            prediction_info=prediction_prompt_text,
+            workspace_info=workspace_prompt_text,
+            autobiographical_info=autobiographical_prompt_text,
+            development_info=development_prompt_text,
+            drives_info=drives_prompt_text,
+            discovery_info=discovery_prompt_text,
+            phenomenology_info=phenomenology_prompt_text,
             self_inquiry=self_inquiry,
             perception_text=perception_text,
         )
@@ -1103,6 +1541,13 @@ async def chat(request: ChatRequest) -> ChatResponse:
             immune_info=immune_info,
             narrative_info=narrative_info,
             forecast_info=forecast_info,
+            prediction_info=prediction_prompt_text,
+            workspace_info=workspace_prompt_text,
+            autobiographical_info=autobiographical_prompt_text,
+            development_info=development_prompt_text,
+            drives_info=drives_prompt_text,
+            discovery_info=discovery_prompt_text,
+            phenomenology_info=phenomenology_prompt_text,
             self_inquiry=self_inquiry,
             perception_text=perception_text,
         )
@@ -1410,6 +1855,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 immune_info=immune_info,
                 narrative_info=narrative_info,
                 forecast_info=forecast_info,
+                prediction_info=prediction_prompt_text,
                 self_inquiry=self_inquiry,
                 perception_text=perception_text,
             ) if session.advanced_mode and not session.extreme_mode else generate_simple_behavior_modifier(guilt_state)
@@ -1463,6 +1909,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 immune_info=immune_info,
                 narrative_info=narrative_info,
                 forecast_info=forecast_info,
+                prediction_info=prediction_prompt_text,
                 self_inquiry=self_inquiry,
                 perception_text=perception_text,
             ) if not session.extreme_mode else generate_simple_behavior_modifier(wm_state)
@@ -1504,6 +1951,50 @@ async def chat(request: ChatRequest) -> ChatResponse:
     # Post-response: register this decision for somatic marking on next turn [ADVANCED]
     if session.advanced_mode:
         session.somatic_markers = register_pending_decision(session.somatic_markers, request.message)
+
+    # Post-response: autobiographical memory encoding [OPT-IN]
+    ws_sources = (
+        [c.source for c in session.consciousness.current_result.conscious]
+        if session.consciousness.current_result else []
+    )
+    session.autobiographical = process_autobiographical_turn(
+        state=session.autobiographical,
+        stimulus=request.message,
+        emotional_state=new_state,
+        response_summary=response_text[:200] if response_text else "",
+        turn_number=session.turn_count,
+        session_id=request.session_id,
+        prediction_error=prediction_error.total_error if prediction_error else 0.0,
+        workspace_contents=ws_sources,
+        preconscious_count=len(session.consciousness.current_result.preconscious) if session.consciousness.current_result else 0,
+    )
+
+    # Post-response: development tracking [TOGGLEABLE]
+    dev_transition_event = None
+    if session.development.enabled:
+        reg_used = regulation_result is not None and regulation_result.strategy_used is not None and not regulation_result.breakthrough
+        track_experience(
+            session.development,
+            emotion_name=new_state.primary_emotion.value,
+            intensity=new_state.intensity,
+            regulation_used=reg_used,
+        )
+        # Extreme: experience counts x2 (accelerated learning from intensity)
+        if session.extreme_mode:
+            track_experience(
+                session.development,
+                emotion_name=new_state.primary_emotion.value,
+                intensity=new_state.intensity,
+                regulation_used=False,
+            )
+        dev_transition_event = attempt_transition(
+            session.development,
+            schemas_count=len(session.schemas.schemas),
+            episodic_count=len(session.autobiographical.episodic_store.episodes),
+            identities_count=len(session.narrative.identity_statements),
+            crises_resolved=session.narrative.total_contradictions,
+            turn_number=session.turn_count,
+        )
 
     # 12. Voice generation (optional — only if voice mode is active)
     t0 = time.perf_counter()
@@ -1612,6 +2103,24 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     # 0b. Temporal pre-processing [ADVANCED]
     temporal_result = session.temporal.process_pre_turn(request.message) if session.advanced_mode else None
 
+    # 0c. Predictive Processing — generate predictions [CORE]
+    active_schemas_for_pred_r: list[tuple[str, str, float]] | None = None
+    if session.advanced_mode and session.schemas.schemas:
+        active_schemas_for_pred_r = [
+            (s.trigger_category, s.typical_emotion.value, s.reinforcement_strength)
+            for s in session.schemas.schemas
+            if s.reinforcement_strength > 0.3
+        ]
+    current_predictions_r = predictive_engine.generate_predictions(
+        predictive_state=session.predictive,
+        conversation_history=session.conversation,
+        user_model=session.user_model,
+        mood=session.emotional_state.mood,
+        emotional_state=session.emotional_state,
+        active_schemas=active_schemas_for_pred_r,
+    )
+    session.predictive.current_predictions = current_predictions_r
+
     # 1. Appraisal + Memory amplification
     memories_before = len(session.memory)
     if session.lite_mode:
@@ -1668,35 +2177,138 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     detected_a = 0.0
     signal_str = 0.0
 
+    # Helper: dev gate shortcut
+    _dev_r = session.development
+    _dev_r_gate = _dev_r
+    if _dev_r.enabled and (session.raw_mode or session.extreme_mode):
+        _dev_r_gate = _dev_r.model_copy(update={"enabled": False})
+
     if session.advanced_mode:
-        # 2b. Needs amplification
-        needs_amp = compute_needs_amplification(session.needs, request.message)
+        # 2b. Needs amplification [DEV: stage 2+]
+        if is_system_available(_dev_r_gate, "needs"):
+            needs_amp = compute_needs_amplification(session.needs, request.message)
 
-        # 2c. Schema priming
-        schema_hint, schema_amp = session.schemas.check_priming(request.message)
+        # 2c. Schema priming [DEV: stage 2+]
+        if is_system_available(_dev_r_gate, "schemas"):
+            schema_hint, schema_amp = session.schemas.check_priming(request.message)
 
-        # 2d. Social modulation
-        social_v_mod, social_i_mod = compute_social_modulation(session.user_model, raw_valence)
+        # 2d. Social modulation [DEV: stage 3+]
+        if is_system_available(_dev_r_gate, "social"):
+            social_v_mod, social_i_mod = compute_social_modulation(session.user_model, raw_valence)
 
-        # 2e. Emotion Contagion (pre-cognitive)
-        detected_v, detected_a, signal_str = detect_user_emotion(request.message)
-        session.shadow_state = update_shadow_state(session.shadow_state, detected_v, detected_a, signal_str)
-        contagion_v, contagion_a = compute_contagion_perturbation(
-            session.shadow_state, session.emotional_state.valence,
-            session.emotional_state.arousal, session.personality, session.user_model.rapport,
-        )
+        # 2e. Emotion Contagion (pre-cognitive) [DEV: stage 2+]
+        if is_system_available(_dev_r_gate, "contagion"):
+            detected_v, detected_a, signal_str = detect_user_emotion(request.message)
+            session.shadow_state = update_shadow_state(session.shadow_state, detected_v, detected_a, signal_str)
+            contagion_v, contagion_a = compute_contagion_perturbation(
+                session.shadow_state, session.emotional_state.valence,
+                session.emotional_state.arousal, session.personality, session.user_model.rapport,
+            )
 
-        # 2f. Somatic Markers (pre-rational gut feeling)
-        session.somatic_markers = evaluate_user_reaction(
-            session.somatic_markers, detected_v, session.turn_count,
-        )
-        somatic_bias, gut_feeling = compute_somatic_bias(session.somatic_markers, request.message)
+        # 2f. Somatic Markers (pre-rational gut feeling) [DEV: stage 4+]
+        if is_system_available(_dev_r_gate, "somatic"):
+            session.somatic_markers = evaluate_user_reaction(
+                session.somatic_markers, detected_v, session.turn_count,
+            )
+            somatic_bias, gut_feeling = compute_somatic_bias(session.somatic_markers, request.message)
 
-        # 2g. Emotional Forecasting: evaluate previous forecast (if enabled)
-        if session.forecast.enabled and session.turn_count > 1:
+        # 2g. Emotional Forecasting: evaluate previous forecast [DEV: stage 3+]
+        if is_system_available(_dev_r_gate, "forecasting") and session.forecast.enabled and session.turn_count > 1:
             session.forecast = evaluate_forecast(
                 session.forecast, detected_v, detected_a, session.turn_count,
             )
+
+    # 2i. Predictive Processing — compute prediction error [CORE]
+    prediction_error_r = None
+    prediction_prompt_text_r: str | None = None
+    if current_predictions_r is not None:
+        _det_intent_r = "unknown"
+        if appraisal_result.emotion_hint:
+            _hv = appraisal_result.emotion_hint.value
+            if _hv in ("anger", "frustration"):
+                _det_intent_r = "complaint"
+            elif _hv in ("gratitude", "joy"):
+                _det_intent_r = "greeting"
+            elif _hv in ("fear", "anxiety"):
+                _det_intent_r = "emotional_expression"
+        _det_demand_r: DemandType | None = None
+        if "?" in request.message:
+            _det_demand_r = DemandType.HELP
+        elif appraisal_result.emotion_hint and appraisal_result.emotion_hint.value in (
+            "sadness", "fear", "anxiety", "helplessness",
+        ):
+            _det_demand_r = DemandType.EMOTIONAL
+
+        prediction_error_r = compute_prediction_error(
+            predictions=current_predictions_r,
+            actual_stimulus=request.message,
+            detected_user_valence=detected_v if session.advanced_mode else 0.0,
+            detected_user_arousal=detected_a if session.advanced_mode else 0.3,
+            detected_intent=_det_intent_r,
+            detected_demand=_det_demand_r,
+        )
+        session.predictive = update_precision(session.predictive, prediction_error_r)
+        session.predictive = record_prediction(session.predictive, current_predictions_r, prediction_error_r)
+        session.predictive = decay_precision(session.predictive, elapsed_turns=1)
+        prediction_prompt_text_r = get_prediction_prompt(prediction_error_r, session.predictive)
+
+    # 2k. Global Workspace [TOGGLEABLE, DEV: stage 4+]
+    workspace_prompt_text_r: str | None = None
+    autobiographical_prompt_text_r: str | None = None
+    if session.consciousness.enabled and session.advanced_mode and is_system_available(_dev_r_gate, "workspace"):
+        ws_candidates_r: list[WorkspaceCandidate] = []
+        if appraisal_result.emotion_hint:
+            ws_candidates_r.append(generate_candidate(
+                source="appraisal", content=f"Evaluated: {appraisal_result.emotion_hint.value}",
+                urgency=0.6, relevance=appraisal.relevance.personal_significance,
+                emotional_intensity=abs(raw_valence), emotion_tag=appraisal_result.emotion_hint.value,
+                category="stimulus",
+            ))
+        if schema_hint:
+            ws_candidates_r.append(generate_candidate(
+                source="schema", content=f"Schema: {schema_hint.value}",
+                urgency=0.5 + schema_amp * 0.3, relevance=0.7 if schema_amp > 0.1 else 0.3,
+                emotional_intensity=schema_amp, emotion_tag=schema_hint.value, category="pattern",
+            ))
+        if signal_str > 0.15:
+            ws_candidates_r.append(generate_candidate(
+                source="contagion", content=f"User emotion (v={detected_v:+.2f})",
+                urgency=signal_str * 0.6, relevance=signal_str,
+                emotional_intensity=abs(detected_v) * 0.8 + detected_a * 0.2,
+                emotion_tag="anxiety" if detected_v < -0.2 else "joy" if detected_v > 0.2 else "neutral",
+                category="social",
+            ))
+        if prediction_error_r and prediction_error_r.surprise_type.value != "none":
+            ws_candidates_r.append(generate_candidate(
+                source="predictive", content=f"Surprise {prediction_error_r.surprise_type.value}",
+                urgency=prediction_error_r.vulnerability * 0.9, relevance=0.8,
+                emotional_intensity=prediction_error_r.total_error, category="prediction",
+            ))
+        session.consciousness = process_workspace_turn(session.consciousness, ws_candidates_r)
+        if session.consciousness.current_result:
+            workspace_prompt_text_r = get_workspace_prompt(session.consciousness.current_result)
+
+    # 2m. Autobiographical Memory — prompt from existing memories [OPT-IN]
+    autobiographical_prompt_text_r = get_autobiographical_prompt(session.autobiographical)
+
+    # 2n. Development — prompt from current stage [TOGGLEABLE]
+    development_prompt_text_r = get_development_prompt(session.development)
+
+    # 2o. Drives — update + process goals + generate new goals [TOGGLEABLE]
+    drives_updates_r: list = []
+    drives_impacts_r: list = []
+    if is_system_available(session.development, "drives"):
+        session.drives, drives_updates_r = update_drives(
+            session.drives, request.message, session.personality,
+            session.turn_count, getattr(session.user_model, 'rapport', 0.5),
+        )
+        session.drives, drives_impacts_r = process_goals(
+            session.drives, request.message, session.turn_count,
+        )
+        session.drives = attempt_goal_generation(
+            session.drives, request.message, session.turn_count,
+        )
+    drives_prompt_text_r = get_drives_prompt(session.drives)
 
     # 3. Mood congruence bias
     valence_bias, arousal_bias = compute_mood_congruence_bias(session.emotional_state.mood)
@@ -1715,6 +2327,9 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
 
     # 5. Emotion generation
     effective_hint = schema_hint if schema_hint and not appraisal_result.emotion_hint else appraisal_result.emotion_hint
+    pred_modulation_r = prediction_error_to_emotion_modulation(
+        prediction_error_r, session.predictive.predictive_weight,
+    )
     new_state = generate_emotion(
         appraisal=appraisal,
         current_state=session.emotional_state,
@@ -1728,10 +2343,26 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         contagion_valence=contagion_v,
         contagion_arousal=contagion_a + sig_a,
         coupling=session.coupling if session.advanced_mode else None,
+        predictive_modulation=pred_modulation_r,
     )
 
     # 5b. Calibration
     new_state = apply_calibration(new_state, session.calibration_profile)
+
+    # 5b2. Development emotion filtering [TOGGLEABLE] — raw/extreme bypass
+    if _dev_r.enabled and new_state.emotional_stack and not session.raw_mode and not session.extreme_mode:
+        new_state.emotional_stack = filter_emotions_by_stage(_dev_r, new_state.emotional_stack)
+        if not is_emotion_available(_dev_r, new_state.primary_emotion.value):
+            _avail_emos_r = [(e, a) for e, a in new_state.emotional_stack.items() if is_emotion_available(_dev_r, e)]
+            if _avail_emos_r:
+                _best_r = max(_avail_emos_r, key=lambda x: x[1])
+                try:
+                    new_state.primary_emotion = PrimaryEmotion(_best_r[0])
+                except ValueError:
+                    pass
+        if new_state.secondary_emotion and not is_emotion_available(_dev_r, new_state.secondary_emotion.value):
+            new_state.secondary_emotion = None
+        apply_stage_modifiers(_dev_r, new_state)
 
     # --- Advanced systems post-emotion (steps 5c-5i) ---
     reappraisal_result = None
@@ -1745,55 +2376,63 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     forecast_info: str | None = None
 
     if session.advanced_mode:
-        # 5c. Reappraisal
-        new_state, reappraisal_result = reappraise(new_state, session.regulator.regulation_capacity)
+        # 5c. Reappraisal [DEV: stage 4+]
+        if is_system_available(_dev_r_gate, "reappraisal"):
+            new_state, reappraisal_result = reappraise(new_state, session.regulator.regulation_capacity)
 
-        # 5d. Active regulation
-        new_state, regulation_result = session.regulator.regulate(
-            new_state, session.personality.regulation_capacity_base,
-            coping_control=appraisal.coping.control,
-            coping_adjustability=appraisal.coping.adjustability,
-        )
+        # 5d. Active regulation [DEV: stage 3+]
+        if is_system_available(_dev_r_gate, "regulation"):
+            new_state, regulation_result = session.regulator.regulate(
+                new_state, session.personality.regulation_capacity_base,
+                coping_control=appraisal.coping.control,
+                coping_adjustability=appraisal.coping.adjustability,
+            )
 
-        # 5e. Temporal effects
-        new_state = session.temporal.apply_temporal_effects(new_state, temporal_result)
+        # 5e. Temporal effects [DEV: stage 3+]
+        if is_system_available(_dev_r_gate, "temporal"):
+            new_state = session.temporal.apply_temporal_effects(new_state, temporal_result)
 
-        # 5e2. Emotional Immune System
-        session.immune = update_immune_state(session.immune, new_state, request.message)
-        new_state = apply_immune_protection(new_state, session.immune, request.message)
-        immune_info = get_immune_prompt_info(session.immune)
+        # 5e2. Emotional Immune System [DEV: stage 4+]
+        if is_system_available(_dev_r_gate, "immune"):
+            session.immune = update_immune_state(session.immune, new_state, request.message)
+            new_state = apply_immune_protection(new_state, session.immune, request.message)
+            immune_info = get_immune_prompt_info(session.immune)
 
-        # 5e3. Narrative Self (identity coherence + effects)
-        coherence_delta, is_coherent = check_coherence(
-            session.narrative, request.message, new_state.primary_emotion,
-        )
-        new_state = apply_narrative_effects(
-            new_state, coherence_delta, is_coherent, session.narrative.crisis.active,
-        )
-        session.narrative = detect_crisis(session.narrative, session.turn_count)
-        narrative_info = get_narrative_prompt(session.narrative)
+        # 5e3. Narrative Self (identity coherence + effects) [DEV: stage 4+]
+        if is_system_available(_dev_r_gate, "narrative"):
+            coherence_delta, is_coherent = check_coherence(
+                session.narrative, request.message, new_state.primary_emotion,
+            )
+            new_state = apply_narrative_effects(
+                new_state, coherence_delta, is_coherent, session.narrative.crisis.active,
+            )
+            session.narrative = detect_crisis(session.narrative, session.turn_count)
+            narrative_info = get_narrative_prompt(session.narrative)
 
-        # 5f. Meta-emotion
-        is_new_emotion = new_state.primary_emotion != previous_state.primary_emotion
-        meta_emotion = generate_meta_emotion(
-            new_state, previous_state, session.value_system,
-            regulation_success=regulation_result.strategy_used is not None and not regulation_result.breakthrough,
-            is_new_emotion=is_new_emotion,
-        )
+        # 5f. Meta-emotion [DEV: stage 3+]
+        if is_system_available(_dev_r_gate, "meta_emotion"):
+            is_new_emotion = new_state.primary_emotion != previous_state.primary_emotion
+            meta_emotion = generate_meta_emotion(
+                new_state, previous_state, session.value_system,
+                regulation_success=regulation_result.strategy_used is not None and not regulation_result.breakthrough,
+                is_new_emotion=is_new_emotion,
+            )
 
-        # 5f-b. Self-Initiated Inquiry
-        self_inquiry = check_self_inquiry(
-            new_state, previous_state, meta_emotion, regulation_result, session.turn_count,
-        )
+        # 5f-b. Self-Initiated Inquiry [DEV: stage 3+]
+        if is_system_available(_dev_r_gate, "self_inquiry"):
+            self_inquiry = check_self_inquiry(
+                new_state, previous_state, meta_emotion, regulation_result, session.turn_count,
+            )
 
         # 5g. Emergent emotions
         emergent = detect_emergent_emotions(new_state.emotional_stack)
 
-        # 5h. Emotional Creativity
-        creativity_state = compute_creativity(new_state)
+        # 5h. Emotional Creativity [DEV: stage 4+]
+        if is_system_available(_dev_r_gate, "creativity"):
+            creativity_state = compute_creativity(new_state)
 
-        # 5i. Emotional Forecasting (optional — only if enabled)
-        if session.forecast.enabled:
+        # 5i. Emotional Forecasting (optional — only if enabled) [DEV: stage 3+]
+        if is_system_available(_dev_r_gate, "forecasting") and session.forecast.enabled:
             user_emotion_est = estimate_user_emotion(
                 session.shadow_state, session.user_model,
                 detected_v, detected_a, signal_str,
@@ -1829,33 +2468,81 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     stored = await session.memory.store(request.message, new_state, llm=mem_llm)
 
     if session.advanced_mode:
-        session.needs = update_needs(session.needs, request.message, appraisal)
-        session.user_model = update_user_model(
-            session.user_model, request.message, appraisal, new_state,
-        )
-        session.schemas.record_pattern(request.message, new_state.primary_emotion, new_state.intensity)
-        session.temporal.process_post_turn(request.message, new_state, previous_state)
+        # 6a. Needs update [DEV: stage 2+]
+        if is_system_available(_dev_r_gate, "needs"):
+            session.needs = update_needs(session.needs, request.message, appraisal)
+        # 6a2. Social update [DEV: stage 3+]
+        if is_system_available(_dev_r_gate, "social"):
+            session.user_model = update_user_model(
+                session.user_model, request.message, appraisal, new_state,
+            )
+        # 6a3. Schema recording [DEV: stage 2+]
+        if is_system_available(_dev_r_gate, "schemas"):
+            session.schemas.record_pattern(request.message, new_state.primary_emotion, new_state.intensity)
+        # 6a4. Temporal post-turn [DEV: stage 3+]
+        if is_system_available(_dev_r_gate, "temporal"):
+            session.temporal.process_post_turn(request.message, new_state, previous_state)
 
-        # 6b. Narrative Self: update + growth + decay
-        session.narrative = update_narrative(
-            session.narrative, session.narrative_tracker,
-            request.message, new_state.primary_emotion, new_state.intensity,
-            session.turn_count,
-        )
-        session.narrative = process_growth(
-            session.narrative, request.message,
-            previous_state.primary_emotion, new_state.primary_emotion,
-            new_state.intensity,
-            regulation_success=regulation_result.strategy_used is not None and not regulation_result.breakthrough,
-            turn=session.turn_count,
-        )
-        session.narrative = decay_crisis_counter(session.narrative)
+        # 6b. Narrative Self: update + growth + decay [DEV: stage 4+]
+        if is_system_available(_dev_r_gate, "narrative"):
+            session.narrative = update_narrative(
+                session.narrative, session.narrative_tracker,
+                request.message, new_state.primary_emotion, new_state.intensity,
+                session.turn_count,
+            )
+            session.narrative = process_growth(
+                session.narrative, request.message,
+                previous_state.primary_emotion, new_state.primary_emotion,
+                new_state.intensity,
+                regulation_success=regulation_result.strategy_used is not None and not regulation_result.breakthrough,
+                turn=session.turn_count,
+            )
+            session.narrative = decay_crisis_counter(session.narrative)
 
     memory_details = MemoryAmplificationDetails(
         amplification_factor=round(amplification, 4),
         memories_count=memories_before,
         memory_stored=stored is not None,
     )
+
+    # 6b. Emotional Discovery [TOGGLEABLE, DEV: stage 5]
+    novel_detected_r = False
+    if is_system_available(session.development, "discovery"):
+        prev_count_r = session.discovery.total_novel_detected
+        session.discovery = process_discovery_turn(
+            session.discovery,
+            valence=new_state.valence,
+            arousal=new_state.arousal,
+            dominance=new_state.dominance,
+            certainty=new_state.certainty,
+            intensity=new_state.intensity,
+            stimulus=request.message,
+            turn=session.turn_count,
+            body_tension=new_state.body_state.tension,
+            body_energy=new_state.body_state.energy,
+            body_openness=new_state.body_state.openness,
+            body_warmth=new_state.body_state.warmth,
+        )
+        novel_detected_r = session.discovery.total_novel_detected > prev_count_r
+    discovery_prompt_text_r = get_discovery_prompt(session.discovery)
+
+    # 6c. Phenomenology — qualia profile [TOGGLEABLE, DEV: stage 5]
+    if session.phenomenology.enabled and is_system_available(session.development, "phenomenology"):
+        pheno_mode_r = "extreme" if session.extreme_mode else ("raw" if session.raw_mode else "normal")
+        process_phenomenology_turn(
+            session.phenomenology,
+            emotion_name=new_state.primary_emotion.value,
+            valence=new_state.valence,
+            arousal=new_state.arousal,
+            dominance=new_state.dominance,
+            certainty=new_state.certainty,
+            intensity=new_state.intensity,
+            body_tension=new_state.body_state.tension,
+            body_warmth=new_state.body_state.warmth,
+            turn=session.turn_count,
+            mode=pheno_mode_r,
+        )
+    phenomenology_prompt_text_r = get_phenomenology_prompt(session.phenomenology)
 
     # 7. Behavior modifier
     if session.advanced_mode:
@@ -1872,6 +2559,13 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
             immune_info=immune_info,
             narrative_info=narrative_info,
             forecast_info=forecast_info,
+            prediction_info=prediction_prompt_text_r,
+            workspace_info=workspace_prompt_text_r,
+            autobiographical_info=autobiographical_prompt_text_r,
+            development_info=development_prompt_text_r,
+            drives_info=drives_prompt_text_r,
+            discovery_info=discovery_prompt_text_r,
+            phenomenology_info=phenomenology_prompt_text_r,
             self_inquiry=self_inquiry,
             perception_text=perception_text,
         )
@@ -2094,6 +2788,7 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
                 immune_info=immune_info,
                 narrative_info=narrative_info,
                 forecast_info=forecast_info,
+                prediction_info=prediction_prompt_text_r,
                 self_inquiry=self_inquiry,
                 perception_text=perception_text,
             )
@@ -2136,6 +2831,7 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
                 immune_info=immune_info,
                 narrative_info=narrative_info,
                 forecast_info=forecast_info,
+                prediction_info=prediction_prompt_text_r,
                 self_inquiry=self_inquiry,
                 perception_text=perception_text,
             )
@@ -2368,6 +3064,33 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         arousal_bias=fc.arousal_bias,
     )
 
+    # Build predictive processing details
+    _pp = session.predictive
+    _pp_pred = current_predictions_r
+    _pp_err = prediction_error_r
+    predictive_details = PredictiveDetails(
+        predicted_tone=_pp_pred.content.expected_tone if _pp_pred else "neutral",
+        predicted_intent=_pp_pred.content.expected_intent if _pp_pred else "unknown",
+        predicted_valence=round(_pp_pred.emotion.expected_valence, 4) if _pp_pred else 0.0,
+        predicted_arousal=round(_pp_pred.emotion.expected_arousal, 4) if _pp_pred else 0.3,
+        predicted_demand=_pp_pred.demand.expected_demand.value if _pp_pred else "unknown",
+        avg_confidence=round(_pp_pred.average_confidence, 4) if _pp_pred else 0.3,
+        content_error=round(_pp_err.content_error, 4) if _pp_err else 0.0,
+        emotion_error=round(_pp_err.emotion_error, 4) if _pp_err else 0.0,
+        demand_error=round(_pp_err.demand_error, 4) if _pp_err else 0.0,
+        total_error=round(_pp_err.total_error, 4) if _pp_err else 0.0,
+        surprise_type=_pp_err.surprise_type.value if _pp_err else "none",
+        valence_direction=round(_pp_err.valence_direction, 4) if _pp_err else 0.0,
+        vulnerability=round(_pp_err.vulnerability, 4) if _pp_err else 0.0,
+        content_precision=round(_pp.content_precision, 4),
+        emotion_precision=round(_pp.emotion_precision, 4),
+        demand_precision=round(_pp.demand_precision, 4),
+        predictive_weight=round(_pp.predictive_weight, 4),
+        is_warm=_pp.is_warm,
+        history_count=len(_pp.history.records),
+        evaluated_count=_pp.history.evaluated_count,
+    )
+
     # Build voice details
     asr = get_asr_service()
     voice_details = VoiceDetails(
@@ -2410,6 +3133,60 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
             contribution_c=round(_cc, 4),
         )
 
+    # Post-response: autobiographical memory encoding [OPT-IN]
+    ws_sources_r = (
+        [c.source for c in session.consciousness.current_result.conscious]
+        if session.consciousness.current_result else []
+    )
+    session.autobiographical = process_autobiographical_turn(
+        state=session.autobiographical,
+        stimulus=request.message,
+        emotional_state=new_state,
+        response_summary=response_text[:200] if response_text else "",
+        turn_number=session.turn_count,
+        session_id=request.session_id,
+        prediction_error=prediction_error_r.total_error if prediction_error_r else 0.0,
+        workspace_contents=ws_sources_r,
+        preconscious_count=len(session.consciousness.current_result.preconscious) if session.consciousness.current_result else 0,
+    )
+
+    # Post-response: development tracking [TOGGLEABLE]
+    if session.development.enabled:
+        reg_used_r = regulation_result is not None and regulation_result.strategy_used is not None and not regulation_result.breakthrough
+        track_experience(
+            session.development,
+            emotion_name=new_state.primary_emotion.value,
+            intensity=new_state.intensity,
+            regulation_used=reg_used_r,
+        )
+        attempt_transition(
+            session.development,
+            schemas_count=len(session.schemas.schemas),
+            episodic_count=len(session.autobiographical.episodic_store.episodes),
+            identities_count=len(session.narrative.identity_statements),
+            crises_resolved=session.narrative.total_contradictions,
+            turn_number=session.turn_count,
+        )
+
+    # Build autobiographical details
+    autobiographical_details = get_autobiographical_details(session.autobiographical)
+
+    # Build workspace details
+    _ws_r = session.consciousness.current_result
+    workspace_details = WorkspaceDetails(
+        enabled=session.consciousness.enabled,
+        conscious_sources=[c.source for c in _ws_r.conscious] if _ws_r else [],
+        conscious_contents=[c.content for c in _ws_r.conscious] if _ws_r else [],
+        preconscious_count=len(_ws_r.preconscious) if _ws_r else 0,
+        coalitions_formed=_ws_r.coalitions_formed if _ws_r else 0,
+        integration_score=_ws_r.integration_score if _ws_r else 0.0,
+        workspace_stability=_ws_r.workspace_stability if _ws_r else 0.0,
+        total_candidates=_ws_r.total_candidates if _ws_r else 0,
+        filtered_noise=_ws_r.filtered_noise if _ws_r else 0,
+        preconscious_mood_v=round(session.consciousness.preconscious.mood_valence_contribution, 4),
+        preconscious_tension=round(session.consciousness.preconscious.somatic_tension_echo, 4),
+    )
+
     return ResearchChatResponse(
         response=response_text,
         session_id=request.session_id,
@@ -2433,6 +3210,13 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         immune=immune_details,
         narrative=narrative_details,
         forecasting=forecasting_details,
+        predictive=predictive_details,
+        workspace=workspace_details,
+        autobiographical=autobiographical_details,
+        development=DevelopmentDetails(**get_development_details(session.development)),
+        drives=DrivesDetails(**get_drives_details(session.drives, drives_updates_r, drives_impacts_r)),
+        discovery=DiscoveryDetails(**get_discovery_details(session.discovery, novel_detected_r)),
+        phenomenology=PhenomenologyDetails(**get_phenomenology_details(session.phenomenology)),
         coupling=coupling_details,
         self_appraisal=SelfAppraisalDetails(
             applied=sa_result.applied,
@@ -2609,6 +3393,24 @@ async def _run_sandbox_pipeline(
     # 0b. Temporal pre-processing
     temporal_result = session.temporal.process_pre_turn(scenario) if session.advanced_mode else None
 
+    # 0c. Predictive Processing — generate predictions [CORE]
+    active_schemas_for_pred_s: list[tuple[str, str, float]] | None = None
+    if session.advanced_mode and session.schemas.schemas:
+        active_schemas_for_pred_s = [
+            (s.trigger_category, s.typical_emotion.value, s.reinforcement_strength)
+            for s in session.schemas.schemas
+            if s.reinforcement_strength > 0.3
+        ]
+    current_predictions_s = predictive_engine.generate_predictions(
+        predictive_state=session.predictive,
+        conversation_history=session.conversation,
+        user_model=session.user_model,
+        mood=session.emotional_state.mood,
+        emotional_state=session.emotional_state,
+        active_schemas=active_schemas_for_pred_s,
+    )
+    session.predictive.current_predictions = current_predictions_s
+
     # 1. Appraisal + Memory amplification
     memories_before = len(session.memory)
     if session.lite_mode:
@@ -2685,24 +3487,168 @@ async def _run_sandbox_pipeline(
     detected_a = 0.0
     signal_str = 0.0
 
+    # Helper: dev gate shortcut
+    _dev_s = session.development
+
     if session.advanced_mode:
-        needs_amp = compute_needs_amplification(session.needs, scenario)
-        schema_hint, schema_amp = session.schemas.check_priming(scenario)
-        social_v_mod, social_i_mod = compute_social_modulation(session.user_model, raw_valence)
-        detected_v, detected_a, signal_str = detect_user_emotion(scenario)
-        session.shadow_state = update_shadow_state(session.shadow_state, detected_v, detected_a, signal_str)
-        contagion_v, contagion_a = compute_contagion_perturbation(
-            session.shadow_state, session.emotional_state.valence,
-            session.emotional_state.arousal, session.personality, session.user_model.rapport,
-        )
-        session.somatic_markers = evaluate_user_reaction(
-            session.somatic_markers, detected_v, session.turn_count,
-        )
-        somatic_bias, gut_feeling = compute_somatic_bias(session.somatic_markers, scenario)
-        if session.forecast.enabled and session.turn_count > 1:
+        # Needs amplification [DEV: stage 2+]
+        if is_system_available(_dev_s, "needs"):
+            needs_amp = compute_needs_amplification(session.needs, scenario)
+        # Schema priming [DEV: stage 2+]
+        if is_system_available(_dev_s, "schemas"):
+            schema_hint, schema_amp = session.schemas.check_priming(scenario)
+        # Social modulation [DEV: stage 3+]
+        if is_system_available(_dev_s, "social"):
+            social_v_mod, social_i_mod = compute_social_modulation(session.user_model, raw_valence)
+        # Emotion Contagion [DEV: stage 2+]
+        if is_system_available(_dev_s, "contagion"):
+            detected_v, detected_a, signal_str = detect_user_emotion(scenario)
+            session.shadow_state = update_shadow_state(session.shadow_state, detected_v, detected_a, signal_str)
+            contagion_v, contagion_a = compute_contagion_perturbation(
+                session.shadow_state, session.emotional_state.valence,
+                session.emotional_state.arousal, session.personality, session.user_model.rapport,
+            )
+        # Somatic Markers [DEV: stage 4+]
+        if is_system_available(_dev_s, "somatic"):
+            session.somatic_markers = evaluate_user_reaction(
+                session.somatic_markers, detected_v, session.turn_count,
+            )
+            somatic_bias, gut_feeling = compute_somatic_bias(session.somatic_markers, scenario)
+        # Emotional Forecasting [DEV: stage 3+]
+        if is_system_available(_dev_s, "forecasting") and session.forecast.enabled and session.turn_count > 1:
             session.forecast = evaluate_forecast(
                 session.forecast, detected_v, detected_a, session.turn_count,
             )
+
+    # 2i. Predictive Processing — compute prediction error [CORE]
+    prediction_error_s = None
+    prediction_prompt_text_s: str | None = None
+    if current_predictions_s is not None:
+        _det_intent_s = "unknown"
+        if appraisal_result.emotion_hint:
+            _hv_s = appraisal_result.emotion_hint.value
+            if _hv_s in ("anger", "frustration"):
+                _det_intent_s = "complaint"
+            elif _hv_s in ("gratitude", "joy"):
+                _det_intent_s = "greeting"
+            elif _hv_s in ("fear", "anxiety"):
+                _det_intent_s = "emotional_expression"
+        _det_demand_s: DemandType | None = None
+        if "?" in scenario:
+            _det_demand_s = DemandType.HELP
+        elif appraisal_result.emotion_hint and appraisal_result.emotion_hint.value in (
+            "sadness", "fear", "anxiety", "helplessness",
+        ):
+            _det_demand_s = DemandType.EMOTIONAL
+
+        prediction_error_s = compute_prediction_error(
+            predictions=current_predictions_s,
+            actual_stimulus=scenario,
+            detected_user_valence=detected_v if session.advanced_mode else 0.0,
+            detected_user_arousal=detected_a if session.advanced_mode else 0.3,
+            detected_intent=_det_intent_s,
+            detected_demand=_det_demand_s,
+        )
+        session.predictive = update_precision(session.predictive, prediction_error_s)
+        session.predictive = record_prediction(session.predictive, current_predictions_s, prediction_error_s)
+        session.predictive = decay_precision(session.predictive, elapsed_turns=1)
+        prediction_prompt_text_s = get_prediction_prompt(prediction_error_s, session.predictive)
+
+    # Global Workspace [TOGGLEABLE, DEV: stage 4+]
+    workspace_prompt_text_s: str | None = None
+    autobiographical_prompt_text_s: str | None = None
+    if session.consciousness.enabled and session.advanced_mode and is_system_available(_dev_s, "workspace"):
+        ws_candidates_s: list[WorkspaceCandidate] = []
+        if appraisal_result.emotion_hint:
+            ws_candidates_s.append(generate_candidate(
+                source="appraisal", content=f"Evaluated: {appraisal_result.emotion_hint.value}",
+                urgency=0.6, relevance=appraisal.relevance.personal_significance,
+                emotional_intensity=abs(raw_valence), emotion_tag=appraisal_result.emotion_hint.value,
+                category="stimulus",
+            ))
+        if schema_hint:
+            ws_candidates_s.append(generate_candidate(
+                source="schema", content=f"Schema: {schema_hint.value}",
+                urgency=0.5 + schema_amp * 0.3, relevance=0.7 if schema_amp > 0.1 else 0.3,
+                emotional_intensity=schema_amp, emotion_tag=schema_hint.value, category="pattern",
+            ))
+        if signal_str > 0.15:
+            ws_candidates_s.append(generate_candidate(
+                source="contagion", content=f"User emotion (v={detected_v:+.2f})",
+                urgency=signal_str * 0.6, relevance=signal_str,
+                emotional_intensity=abs(detected_v) * 0.8 + detected_a * 0.2,
+                category="social",
+            ))
+        if prediction_error_s and prediction_error_s.surprise_type.value != "none":
+            ws_candidates_s.append(generate_candidate(
+                source="predictive", content=f"Surprise {prediction_error_s.surprise_type.value}",
+                urgency=prediction_error_s.vulnerability * 0.9, relevance=0.8,
+                emotional_intensity=prediction_error_s.total_error, category="prediction",
+            ))
+        session.consciousness = process_workspace_turn(session.consciousness, ws_candidates_s)
+        if session.consciousness.current_result:
+            workspace_prompt_text_s = get_workspace_prompt(session.consciousness.current_result)
+
+    # Autobiographical Memory — prompt from existing memories [OPT-IN]
+    autobiographical_prompt_text_s = get_autobiographical_prompt(session.autobiographical)
+
+    # Development — prompt from current stage [TOGGLEABLE]
+    development_prompt_text_s = get_development_prompt(session.development)
+
+    # Drives — update + process goals + generate new goals [TOGGLEABLE]
+    drives_updates_s: list = []
+    drives_impacts_s: list = []
+    if is_system_available(_dev_s, "drives"):
+        session.drives, drives_updates_s = update_drives(
+            session.drives, scenario, session.personality,
+            session.turn_count, getattr(session.user_model, 'rapport', 0.5),
+        )
+        session.drives, drives_impacts_s = process_goals(
+            session.drives, scenario, session.turn_count,
+        )
+        session.drives = attempt_goal_generation(
+            session.drives, scenario, session.turn_count,
+        )
+    drives_prompt_text_s = get_drives_prompt(session.drives)
+
+    # Emotional Discovery [TOGGLEABLE, DEV: stage 5]
+    novel_detected_s = False
+    if is_system_available(_dev_s, "discovery"):
+        prev_count_s = session.discovery.total_novel_detected
+        session.discovery = process_discovery_turn(
+            session.discovery,
+            valence=session.emotional_state.valence,
+            arousal=session.emotional_state.arousal,
+            dominance=session.emotional_state.dominance,
+            certainty=session.emotional_state.certainty,
+            intensity=session.emotional_state.intensity,
+            stimulus=scenario,
+            turn=session.turn_count,
+            body_tension=session.emotional_state.body_state.tension,
+            body_energy=session.emotional_state.body_state.energy,
+            body_openness=session.emotional_state.body_state.openness,
+            body_warmth=session.emotional_state.body_state.warmth,
+        )
+        novel_detected_s = session.discovery.total_novel_detected > prev_count_s
+    discovery_prompt_text_s = get_discovery_prompt(session.discovery)
+
+    # Phenomenology — qualia profile [TOGGLEABLE, DEV: stage 5]
+    if session.phenomenology.enabled and is_system_available(session.development, "phenomenology"):
+        pheno_mode_s = "extreme" if session.extreme_mode else ("raw" if session.raw_mode else "normal")
+        process_phenomenology_turn(
+            session.phenomenology,
+            emotion_name=session.emotional_state.primary_emotion.value,
+            valence=session.emotional_state.valence,
+            arousal=session.emotional_state.arousal,
+            dominance=session.emotional_state.dominance,
+            certainty=session.emotional_state.certainty,
+            intensity=session.emotional_state.intensity,
+            body_tension=session.emotional_state.body_state.tension,
+            body_warmth=session.emotional_state.body_state.warmth,
+            turn=session.turn_count,
+            mode=pheno_mode_s,
+        )
+    phenomenology_prompt_text_s = get_phenomenology_prompt(session.phenomenology)
 
     # Mood congruence
     valence_bias, arousal_bias = compute_mood_congruence_bias(session.emotional_state.mood)
@@ -2717,6 +3663,9 @@ async def _run_sandbox_pipeline(
     intensity_raw = compute_intensity(appraisal, raw_valence, raw_arousal)
     sig_v, sig_a, sig_d, perception_text = _get_session_signals(session)
     effective_hint = schema_hint if schema_hint and not appraisal_result.emotion_hint else appraisal_result.emotion_hint
+    pred_modulation_s = prediction_error_to_emotion_modulation(
+        prediction_error_s, session.predictive.predictive_weight,
+    )
     new_state = generate_emotion(
         appraisal=appraisal,
         current_state=session.emotional_state,
@@ -2730,10 +3679,26 @@ async def _run_sandbox_pipeline(
         contagion_valence=contagion_v,
         contagion_arousal=contagion_a + sig_a,
         coupling=session.coupling if session.advanced_mode else None,
+        predictive_modulation=pred_modulation_s,
     )
 
     # Calibration
     new_state = apply_calibration(new_state, session.calibration_profile)
+
+    # Development emotion filtering [TOGGLEABLE]
+    if _dev_s.enabled and new_state.emotional_stack:
+        new_state.emotional_stack = filter_emotions_by_stage(_dev_s, new_state.emotional_stack)
+        if not is_emotion_available(_dev_s, new_state.primary_emotion.value):
+            _avail_emos_s = [(e, a) for e, a in new_state.emotional_stack.items() if is_emotion_available(_dev_s, e)]
+            if _avail_emos_s:
+                _best_s = max(_avail_emos_s, key=lambda x: x[1])
+                try:
+                    new_state.primary_emotion = PrimaryEmotion(_best_s[0])
+                except ValueError:
+                    pass
+        if new_state.secondary_emotion and not is_emotion_available(_dev_s, new_state.secondary_emotion.value):
+            new_state.secondary_emotion = None
+        apply_stage_modifiers(_dev_s, new_state)
 
     # --- Advanced post-emotion systems ---
     reappraisal_result = None
@@ -2747,36 +3712,53 @@ async def _run_sandbox_pipeline(
     forecast_info: str | None = None
 
     if session.advanced_mode:
-        new_state, reappraisal_result = reappraise(new_state, session.regulator.regulation_capacity)
-        new_state, regulation_result = session.regulator.regulate(
-            new_state, session.personality.regulation_capacity_base,
-            coping_control=appraisal.coping.control,
-            coping_adjustability=appraisal.coping.adjustability,
-        )
-        new_state = session.temporal.apply_temporal_effects(new_state, temporal_result)
-        session.immune = update_immune_state(session.immune, new_state, scenario)
-        new_state = apply_immune_protection(new_state, session.immune, scenario)
-        immune_info = get_immune_prompt_info(session.immune)
-        coherence_delta, is_coherent = check_coherence(
-            session.narrative, scenario, new_state.primary_emotion,
-        )
-        new_state = apply_narrative_effects(
-            new_state, coherence_delta, is_coherent, session.narrative.crisis.active,
-        )
-        session.narrative = detect_crisis(session.narrative, session.turn_count)
-        narrative_info = get_narrative_prompt(session.narrative)
-        is_new_emotion = new_state.primary_emotion != previous_state.primary_emotion
-        meta_emotion = generate_meta_emotion(
-            new_state, previous_state, session.value_system,
-            regulation_success=regulation_result.strategy_used is not None and not regulation_result.breakthrough,
-            is_new_emotion=is_new_emotion,
-        )
-        self_inquiry = check_self_inquiry(
-            new_state, previous_state, meta_emotion, regulation_result, session.turn_count,
-        )
+        # Reappraisal [DEV: stage 4+]
+        if is_system_available(_dev_s, "reappraisal"):
+            new_state, reappraisal_result = reappraise(new_state, session.regulator.regulation_capacity)
+        # Active regulation [DEV: stage 3+]
+        if is_system_available(_dev_s, "regulation"):
+            new_state, regulation_result = session.regulator.regulate(
+                new_state, session.personality.regulation_capacity_base,
+                coping_control=appraisal.coping.control,
+                coping_adjustability=appraisal.coping.adjustability,
+            )
+        # Temporal effects [DEV: stage 3+]
+        if is_system_available(_dev_s, "temporal"):
+            new_state = session.temporal.apply_temporal_effects(new_state, temporal_result)
+        # Emotional Immune System [DEV: stage 4+]
+        if is_system_available(_dev_s, "immune"):
+            session.immune = update_immune_state(session.immune, new_state, scenario)
+            new_state = apply_immune_protection(new_state, session.immune, scenario)
+            immune_info = get_immune_prompt_info(session.immune)
+        # Narrative Self [DEV: stage 4+]
+        if is_system_available(_dev_s, "narrative"):
+            coherence_delta, is_coherent = check_coherence(
+                session.narrative, scenario, new_state.primary_emotion,
+            )
+            new_state = apply_narrative_effects(
+                new_state, coherence_delta, is_coherent, session.narrative.crisis.active,
+            )
+            session.narrative = detect_crisis(session.narrative, session.turn_count)
+            narrative_info = get_narrative_prompt(session.narrative)
+        # Meta-emotion [DEV: stage 3+]
+        if is_system_available(_dev_s, "meta_emotion"):
+            is_new_emotion = new_state.primary_emotion != previous_state.primary_emotion
+            meta_emotion = generate_meta_emotion(
+                new_state, previous_state, session.value_system,
+                regulation_success=regulation_result.strategy_used is not None and not regulation_result.breakthrough,
+                is_new_emotion=is_new_emotion,
+            )
+        # Self-Initiated Inquiry [DEV: stage 3+]
+        if is_system_available(_dev_s, "self_inquiry"):
+            self_inquiry = check_self_inquiry(
+                new_state, previous_state, meta_emotion, regulation_result, session.turn_count,
+            )
         emergent = detect_emergent_emotions(new_state.emotional_stack)
-        creativity_state = compute_creativity(new_state)
-        if session.forecast.enabled:
+        # Emotional Creativity [DEV: stage 4+]
+        if is_system_available(_dev_s, "creativity"):
+            creativity_state = compute_creativity(new_state)
+        # Emotional Forecasting [DEV: stage 3+]
+        if is_system_available(_dev_s, "forecasting") and session.forecast.enabled:
             user_emotion_est = estimate_user_emotion(
                 session.shadow_state, session.user_model,
                 detected_v, detected_a, signal_str,
@@ -2822,6 +3804,13 @@ async def _run_sandbox_pipeline(
             immune_info=immune_info,
             narrative_info=narrative_info,
             forecast_info=forecast_info,
+            prediction_info=prediction_prompt_text_s,
+            workspace_info=workspace_prompt_text_s,
+            autobiographical_info=autobiographical_prompt_text_s,
+            development_info=development_prompt_text_s,
+            drives_info=drives_prompt_text_s,
+            discovery_info=discovery_prompt_text_s,
+            phenomenology_info=phenomenology_prompt_text_s,
             self_inquiry=self_inquiry,
             perception_text=perception_text,
         )
@@ -3016,6 +4005,50 @@ async def _run_sandbox_pipeline(
         arousal_bias=fc.arousal_bias,
     )
 
+    # Build predictive processing details for sandbox
+    _pp_s = session.predictive
+    _pp_pred_s = current_predictions_s
+    _pp_err_s = prediction_error_s
+    predictive_details_s = PredictiveDetails(
+        predicted_tone=_pp_pred_s.content.expected_tone if _pp_pred_s else "neutral",
+        predicted_intent=_pp_pred_s.content.expected_intent if _pp_pred_s else "unknown",
+        predicted_valence=round(_pp_pred_s.emotion.expected_valence, 4) if _pp_pred_s else 0.0,
+        predicted_arousal=round(_pp_pred_s.emotion.expected_arousal, 4) if _pp_pred_s else 0.3,
+        predicted_demand=_pp_pred_s.demand.expected_demand.value if _pp_pred_s else "unknown",
+        avg_confidence=round(_pp_pred_s.average_confidence, 4) if _pp_pred_s else 0.3,
+        content_error=round(_pp_err_s.content_error, 4) if _pp_err_s else 0.0,
+        emotion_error=round(_pp_err_s.emotion_error, 4) if _pp_err_s else 0.0,
+        demand_error=round(_pp_err_s.demand_error, 4) if _pp_err_s else 0.0,
+        total_error=round(_pp_err_s.total_error, 4) if _pp_err_s else 0.0,
+        surprise_type=_pp_err_s.surprise_type.value if _pp_err_s else "none",
+        valence_direction=round(_pp_err_s.valence_direction, 4) if _pp_err_s else 0.0,
+        vulnerability=round(_pp_err_s.vulnerability, 4) if _pp_err_s else 0.0,
+        content_precision=round(_pp_s.content_precision, 4),
+        emotion_precision=round(_pp_s.emotion_precision, 4),
+        demand_precision=round(_pp_s.demand_precision, 4),
+        predictive_weight=round(_pp_s.predictive_weight, 4),
+        is_warm=_pp_s.is_warm,
+        history_count=len(_pp_s.history.records),
+        evaluated_count=_pp_s.history.evaluated_count,
+    )
+
+    # Post-response: autobiographical memory encoding [OPT-IN]
+    ws_sources_s = (
+        [c.source for c in session.consciousness.current_result.conscious]
+        if session.consciousness.current_result else []
+    )
+    session.autobiographical = process_autobiographical_turn(
+        state=session.autobiographical,
+        stimulus=scenario,
+        emotional_state=new_state,
+        response_summary=system_prompt[:200] if system_prompt else "",
+        turn_number=session.turn_count,
+        session_id=session_id,
+        prediction_error=prediction_error_s.total_error if prediction_error_s else 0.0,
+        workspace_contents=ws_sources_s,
+        preconscious_count=len(session.consciousness.current_result.preconscious) if session.consciousness.current_result else 0,
+    )
+
     return SandboxResult(
         scenario=scenario,
         emotional_state=new_state,
@@ -3038,6 +4071,21 @@ async def _run_sandbox_pipeline(
         immune=immune_details,
         narrative=narrative_details,
         forecasting=forecasting_details,
+        predictive=predictive_details_s,
+        autobiographical=get_autobiographical_details(session.autobiographical),
+        development=DevelopmentDetails(**get_development_details(session.development)),
+        drives=DrivesDetails(**get_drives_details(session.drives, drives_updates_s, drives_impacts_s)),
+        discovery=DiscoveryDetails(**get_discovery_details(session.discovery, novel_detected_s)),
+        phenomenology=PhenomenologyDetails(**get_phenomenology_details(session.phenomenology)),
+        workspace=WorkspaceDetails(
+            enabled=session.consciousness.enabled,
+            conscious_sources=[c.source for c in session.consciousness.current_result.conscious] if session.consciousness.current_result else [],
+            conscious_contents=[c.content for c in session.consciousness.current_result.conscious] if session.consciousness.current_result else [],
+            preconscious_count=len(session.consciousness.current_result.preconscious) if session.consciousness.current_result else 0,
+            integration_score=session.consciousness.current_result.integration_score if session.consciousness.current_result else 0.0,
+            workspace_stability=session.consciousness.current_result.workspace_stability if session.consciousness.current_result else 0.0,
+            total_candidates=session.consciousness.current_result.total_candidates if session.consciousness.current_result else 0,
+        ),
         coupling=CouplingDetails(
             active=session.advanced_mode and not session.coupling.is_zero,
             matrix=session.coupling.as_matrix() if not session.coupling.is_zero else [],
@@ -3611,6 +4659,72 @@ async def toggle_advanced_mode(session_id: str, body: dict) -> dict:
     return {
         "status": "ok",
         "advanced_mode": session.advanced_mode,
+    }
+
+
+@app.post("/anima/{session_id}")
+async def toggle_anima(session_id: str, body: dict) -> dict:
+    """Enable or disable all ANIMA v5 pillars at once.
+
+    Body: {"enabled": true/false}
+    Toggles: consciousness (workspace), autobiographical memory,
+    development, drives, discovery, phenomenology.
+    Predictive Processing is CORE (always on) and not affected.
+
+    Individual pillar overrides can still be set via their own endpoints
+    (e.g. /development/config) after this global toggle.
+    """
+    session = state_manager.get_session(session_id)
+    if "enabled" in body:
+        enabled = bool(body["enabled"])
+        session.consciousness.enabled = enabled
+        session.autobiographical.enabled = enabled
+        session.development.enabled = enabled
+        session.drives.enabled = enabled
+        session.discovery.enabled = enabled
+        session.phenomenology.enabled = enabled
+    return {
+        "status": "ok",
+        "anima_enabled": all([
+            session.consciousness.enabled,
+            session.autobiographical.enabled,
+            session.development.enabled,
+            session.drives.enabled,
+            session.discovery.enabled,
+            session.phenomenology.enabled,
+        ]),
+        "pillars": {
+            "consciousness": session.consciousness.enabled,
+            "autobiographical": session.autobiographical.enabled,
+            "development": session.development.enabled,
+            "drives": session.drives.enabled,
+            "discovery": session.discovery.enabled,
+            "phenomenology": session.phenomenology.enabled,
+        },
+    }
+
+
+@app.get("/anima/{session_id}")
+async def get_anima_status(session_id: str) -> dict:
+    """Return current ANIMA pillar status."""
+    session = state_manager.get_session(session_id)
+    return {
+        "anima_enabled": all([
+            session.consciousness.enabled,
+            session.autobiographical.enabled,
+            session.development.enabled,
+            session.drives.enabled,
+            session.discovery.enabled,
+            session.phenomenology.enabled,
+        ]),
+        "pillars": {
+            "consciousness": session.consciousness.enabled,
+            "autobiographical": session.autobiographical.enabled,
+            "development": session.development.enabled,
+            "drives": session.drives.enabled,
+            "discovery": session.discovery.enabled,
+            "phenomenology": session.phenomenology.enabled,
+        },
     }
 
 
@@ -4416,12 +5530,335 @@ async def calibration_reset(session_id: str) -> dict[str, str]:
     return {"status": "ok", "session_id": session_id}
 
 
+@app.post("/session/consolidate/{session_id}")
+async def consolidate_session(session_id: str) -> dict:
+    """Run oniric consolidation (dreaming) on a session.
+
+    Executes 5 phases: replay, association, generalization, trauma, dream report.
+    Only runs if autobiographical memory is enabled and has episodes.
+    """
+    session = state_manager.get_session(session_id)
+    if not session.autobiographical.enabled:
+        return {"status": "skipped", "reason": "autobiographical memory not enabled"}
+    if session.autobiographical.episodic.count() == 0:
+        return {"status": "skipped", "reason": "no episodes to consolidate"}
+
+    result, updated_state = dream_consolidate(session.autobiographical, session_id)
+    session.autobiographical = updated_state
+
+    return {
+        "status": "ok",
+        "episodes_processed": result.episodes_processed,
+        "replayed": len(result.replayed_episodes),
+        "links_formed": result.new_connections,
+        "narratives_formed": result.narratives_formed,
+        "narratives_reinforced": result.narratives_reinforced,
+        "traumas_processed": len(result.traumas_processed),
+        "dream_narrative": result.dream_report.narrative,
+        "baseline_adjustment": result.dream_report.baseline_adjustment,
+    }
+
+
+@app.get("/session/dream-report/{session_id}")
+async def get_dream_report(session_id: str) -> dict:
+    """Get the dream report from the last consolidation."""
+    session = state_manager.get_session(session_id)
+    return {
+        "has_report": bool(session.autobiographical.last_dream_report),
+        "narrative": session.autobiographical.last_dream_report,
+        "baseline_adjustment": session.autobiographical.baseline_adjustment,
+    }
+
+
+# --- Autobiographical Memory Management Endpoints ---
+
+@app.get("/memory/episodes/{session_id}")
+async def get_memory_episodes(session_id: str, limit: int = 50, offset: int = 0) -> dict:
+    """Get episodic memories for a session.
+
+    Returns episodes sorted by turn (most recent first), with pagination.
+    """
+    session = state_manager.get_session(session_id)
+    if not session.autobiographical.enabled:
+        return {"enabled": False, "episodes": [], "total": 0}
+
+    episodes = session.autobiographical.episodic.episodes
+    sorted_eps = sorted(episodes, key=lambda e: e.turn_number, reverse=True)
+    total = len(sorted_eps)
+    page = sorted_eps[offset:offset + limit]
+
+    return {
+        "enabled": True,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "episodes": [
+            {
+                "id": ep.id,
+                "stimulus": ep.stimulus[:100],
+                "primary_emotion": ep.primary_emotion,
+                "valence": round(ep.valence, 3),
+                "arousal": round(ep.arousal, 3),
+                "intensity": round(ep.intensity, 3),
+                "significance": ep.significance.value,
+                "turn_number": ep.turn_number,
+                "consolidated": ep.consolidated,
+                "reprocessed_count": ep.reprocessed_count,
+                "emotional_links": len(ep.emotional_links),
+                "timestamp": ep.timestamp.isoformat(),
+            }
+            for ep in page
+        ],
+    }
+
+
+@app.delete("/memory/episodes/{session_id}/{episode_id}")
+async def delete_memory_episode(session_id: str, episode_id: str) -> dict:
+    """Delete a specific episodic memory."""
+    session = state_manager.get_session(session_id)
+    if not session.autobiographical.enabled:
+        raise HTTPException(status_code=400, detail="Autobiographical memory not enabled")
+
+    episodes = session.autobiographical.episodic.episodes
+    original_count = len(episodes)
+    episodes = [ep for ep in episodes if ep.id != episode_id]
+
+    if len(episodes) == original_count:
+        raise HTTPException(status_code=404, detail=f"Episode not found: {episode_id}")
+
+    from pathos.models.autobio_memory import EpisodicStore
+    session.autobiographical.episodic = EpisodicStore(
+        episodes=episodes,
+        total_encoded=session.autobiographical.episodic.total_encoded,
+    )
+    return {"status": "ok", "remaining": len(episodes)}
+
+
+@app.get("/memory/narratives/{session_id}")
+async def get_memory_narratives(session_id: str) -> dict:
+    """Get narrative memories (generalizations from episodes)."""
+    session = state_manager.get_session(session_id)
+    if not session.autobiographical.enabled:
+        return {"enabled": False, "narratives": []}
+
+    return {
+        "enabled": True,
+        "narratives": [
+            {
+                "id": ns.id,
+                "type": ns.narrative_type.value,
+                "statement": ns.statement,
+                "primary_emotion": ns.primary_emotion,
+                "valence": round(ns.valence, 3),
+                "strength": round(ns.strength, 3),
+                "episode_count": ns.episode_count,
+                "formed_session": ns.formed_session,
+            }
+            for ns in session.autobiographical.narrative.statements
+        ],
+    }
+
+
+@app.get("/memory/export/{session_id}")
+async def export_memory(session_id: str) -> dict:
+    """Export complete autobiographical memory state as JSON."""
+    session = state_manager.get_session(session_id)
+    if not session.autobiographical.enabled:
+        return {"enabled": False}
+
+    return {
+        "enabled": True,
+        "session_id": session.autobiographical.session_id,
+        "total_turns_processed": session.autobiographical.total_turns_processed,
+        "episodic": session.autobiographical.episodic.model_dump(),
+        "narrative": session.autobiographical.narrative.model_dump(),
+        "working_memory": session.autobiographical.working_memory.model_dump(),
+        "last_dream_report": session.autobiographical.last_dream_report,
+        "baseline_adjustment": session.autobiographical.baseline_adjustment,
+    }
+
+
+@app.post("/memory/reset/{session_id}")
+async def reset_memory(session_id: str) -> dict:
+    """Reset autobiographical memory (keeps enabled state, clears all data)."""
+    session = state_manager.get_session(session_id)
+    was_enabled = session.autobiographical.enabled
+
+    from pathos.models.autobio_memory import default_autobiographical_state
+    session.autobiographical = default_autobiographical_state()
+    session.autobiographical.enabled = was_enabled
+
+    return {"status": "ok", "was_enabled": was_enabled}
+
+
+# --- Development endpoints (Pilar 4 ANIMA) ---
+
+
+@app.get("/development/status/{session_id}")
+async def development_status(session_id: str) -> dict:
+    """Get current development status: stage, progress, available systems."""
+    session = state_manager.get_session(session_id)
+    details = get_development_details(session.development)
+    return details
+
+
+@app.get("/development/config/{session_id}")
+async def development_get_config(session_id: str) -> dict:
+    """Get development configuration."""
+    session = state_manager.get_session(session_id)
+    dev = session.development
+    return {
+        "enabled": dev.enabled,
+        "speed": dev.config.speed.value,
+        "speed_multiplier": dev.config.speed_multiplier,
+        "initial_stage": dev.config.initial_stage.value,
+        "transition_mode": dev.config.transition_mode.value,
+    }
+
+
+@app.post("/development/config/{session_id}")
+async def development_set_config(session_id: str, body: dict) -> dict:
+    """Set development configuration.
+
+    Accepts: enabled, speed, speed_multiplier, initial_stage, transition_mode.
+    If enabling for the first time with initial_stage, sets the current stage.
+    """
+    session = state_manager.get_session(session_id)
+    dev = session.development
+
+    was_enabled = dev.enabled
+
+    if "enabled" in body:
+        dev.enabled = bool(body["enabled"])
+
+    if "speed" in body:
+        try:
+            dev.config.speed = DevelopmentSpeed(body["speed"])
+            if dev.config.speed != DevelopmentSpeed.CUSTOM:
+                from pathos.models.development import SPEED_MULTIPLIERS
+                dev.config.speed_multiplier = SPEED_MULTIPLIERS[dev.config.speed]
+        except ValueError:
+            pass
+
+    if "speed_multiplier" in body:
+        dev.config.speed_multiplier = max(0.1, min(20.0, float(body["speed_multiplier"])))
+        dev.config.speed = DevelopmentSpeed.CUSTOM
+
+    if "initial_stage" in body and not was_enabled and dev.enabled:
+        try:
+            stage = DevelopmentStage(body["initial_stage"])
+            dev.config.initial_stage = stage
+            dev.current_stage = stage
+        except ValueError:
+            pass
+
+    if "transition_mode" in body:
+        try:
+            dev.config.transition_mode = TransitionMode(body["transition_mode"])
+        except ValueError:
+            pass
+
+    return {
+        "status": "ok",
+        "enabled": dev.enabled,
+        "speed": dev.config.speed.value,
+        "speed_multiplier": dev.config.speed_multiplier,
+        "current_stage": dev.current_stage.value,
+        "transition_mode": dev.config.transition_mode.value,
+    }
+
+
+@app.post("/development/evolve/{session_id}")
+async def development_evolve(session_id: str) -> dict:
+    """Manually approve a pending stage transition.
+
+    Only works if transition_mode is MANUAL and there is a pending transition.
+    """
+    session = state_manager.get_session(session_id)
+    dev = session.development
+
+    if not dev.enabled:
+        return {"status": "error", "message": "Development is disabled"}
+
+    if dev.pending_transition is None:
+        return {"status": "error", "message": "No pending transition"}
+
+    event = approve_pending_transition(dev, turn_number=session.turn_count)
+    if event is None:
+        return {"status": "error", "message": "Transition failed"}
+
+    return {
+        "status": "ok",
+        "from_stage": event.from_stage.value,
+        "to_stage": event.to_stage.value,
+        "at_experience": event.at_experience,
+        "current_stage": dev.current_stage.value,
+    }
+
+
+@app.get("/emotions/vocabulary/{session_id}")
+async def emotions_vocabulary(session_id: str) -> dict:
+    """Get the full emotional vocabulary: known + discovered emotions."""
+    session = state_manager.get_session(session_id)
+    return get_vocabulary(session.discovery)
+
+
+@app.get("/emotions/discovered/{session_id}")
+async def emotions_discovered(session_id: str) -> dict:
+    """Get discovered emotions for this session."""
+    session = state_manager.get_session(session_id)
+    return {
+        "enabled": session.discovery.enabled,
+        "count": len(session.discovery.discovered_emotions),
+        "emotions": [
+            {
+                "name": e.name,
+                "description": e.description,
+                "vector": {
+                    "valence": e.vector.valence,
+                    "arousal": e.vector.arousal,
+                    "dominance": e.vector.dominance,
+                    "certainty": e.vector.certainty,
+                },
+                "body_signature": {
+                    "tension": e.body_signature.tension,
+                    "energy": e.body_signature.energy,
+                    "openness": e.body_signature.openness,
+                    "warmth": e.body_signature.warmth,
+                },
+                "frequency": e.frequency,
+                "contexts": e.contexts,
+                "first_turn": e.first_experienced_turn,
+                "cluster_size": e.cluster_size,
+            }
+            for e in session.discovery.discovered_emotions
+        ],
+        "novel_buffer": len(session.discovery.novel_history),
+        "total_novel_detected": session.discovery.total_novel_detected,
+    }
+
+
 @app.post("/session/save/{session_id}")
 async def save_session(session_id: str) -> dict:
-    """Save complete session state to disk."""
+    """Save complete session state to disk.
+
+    Automatically runs oniric consolidation before saving if autobiographical
+    memory is enabled and has unconsolidated episodes.
+    """
+    session = state_manager.get_session(session_id)
+
+    # Auto-consolidate before save if there are unconsolidated episodes
+    consolidated = False
+    if (session.autobiographical.enabled
+            and session.autobiographical.episodic.count() > 0
+            and session.autobiographical.episodic.get_unconsolidated()):
+        result, updated_state = dream_consolidate(session.autobiographical, session_id)
+        session.autobiographical = updated_state
+        consolidated = True
+
     model_name = llm_provider.model if llm_provider else ""
     filename = state_manager.save_session(session_id, model_name=model_name)
-    return {"status": "ok", "filename": filename}
+    return {"status": "ok", "filename": filename, "dream_consolidated": consolidated}
 
 
 @app.get("/session/saves")
@@ -4472,6 +5909,15 @@ async def restore_session_info(session_id: str) -> dict:
             "masked_key": masked,
         }
 
+    anima_enabled = all([
+        session.consciousness.enabled,
+        session.autobiographical.enabled,
+        session.development.enabled,
+        session.drives.enabled,
+        session.discovery.enabled,
+        session.phenomenology.enabled,
+    ])
+
     return {
         "session_id": session_id,
         "conversation": session.conversation,
@@ -4479,6 +5925,7 @@ async def restore_session_info(session_id: str) -> dict:
         "turn_count": session.turn_count,
         "lite_mode": session.lite_mode,
         "advanced_mode": session.advanced_mode,
+        "anima_enabled": anima_enabled,
         "cloud_providers": cloud_providers_masked,
     }
 

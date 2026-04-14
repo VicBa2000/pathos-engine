@@ -23,6 +23,8 @@ interface Props {
   onToggleAdvancedMode: () => void;
   liteMode: boolean;
   onToggleLiteMode: () => void;
+  animaEnabled: boolean;
+  onToggleAnima: () => void;
   voiceEnabled: boolean;
   voiceLoading: boolean;
   onToggleVoice: () => void;
@@ -38,6 +40,8 @@ interface Props {
   onTogglePipeline: () => void;
   showGenesis: boolean;
   onToggleGenesis: () => void;
+  showOrb: boolean;
+  onToggleOrb: () => void;
   showAvatar: boolean;
   onToggleAvatar: () => void;
   panelLimitReached: boolean;
@@ -61,9 +65,10 @@ export function ModeSelector({
   showForecasting, onToggleForecasting,
   advancedMode, onToggleAdvancedMode,
   liteMode, onToggleLiteMode,
+  animaEnabled, onToggleAnima,
   voiceEnabled, voiceLoading, onToggleVoice,
   micEnabled, onToggleMic, micReady, onMicReady, onStreamReady,
-  showEmotionSidebar, onToggleEmotionSidebar, showPipeline, onTogglePipeline, showGenesis, onToggleGenesis, showAvatar, onToggleAvatar,
+  showEmotionSidebar, onToggleEmotionSidebar, showPipeline, onTogglePipeline, showGenesis, onToggleGenesis, showOrb, onToggleOrb, showAvatar, onToggleAvatar,
   panelLimitReached,
   sessionId, onNewSession, onSave, saving, onExport, onExportPortable, exporting, exportingPortable,
   currentProvider, onExitRaw, modelLocked, onExitAutonomous,
@@ -235,6 +240,7 @@ export function ModeSelector({
                   <SettingsSwitch label="Network Graph" on={showNetwork} onToggle={onToggleNetwork} disabled={!showNetwork && panelLimitReached} hint={!showNetwork && panelLimitReached ? "Max panels reached" : undefined} />
                   <SettingsSwitch label="Pipeline Viewer" on={showPipeline} onToggle={onTogglePipeline} disabled={!showPipeline && panelLimitReached} hint={!showPipeline && panelLimitReached ? "Max panels reached" : "Visual step-by-step flow"} />
                   <SettingsSwitch label="Emotion Genesis" on={showGenesis} onToggle={onToggleGenesis} disabled={!showGenesis && panelLimitReached} hint={!showGenesis && panelLimitReached ? "Max panels reached" : "Living organism view"} />
+                  <SettingsSwitch label="Qualia Orb" on={showOrb} onToggle={onToggleOrb} disabled={!showOrb && panelLimitReached} hint={!showOrb && panelLimitReached ? "Max panels reached" : "3D phenomenological orb"} />
                   <SettingsSwitch label="Emotion Avatar" on={showAvatar} onToggle={onToggleAvatar} disabled={!showAvatar && panelLimitReached} hint={!showAvatar && panelLimitReached ? "Max panels reached" : "Animated face view"} />
                   {panelLimitReached && (
                     <div className="settings-panel__limit-notice">Max 3 panels — disable one to enable another</div>
@@ -249,6 +255,7 @@ export function ModeSelector({
                 {!isRawMode && !isAutonomousMode && (
                   <SettingsSwitch label="Forecasting" on={showForecasting} onToggle={onToggleForecasting} hint="Predict emotional impact" />
                 )}
+                <SettingsSwitch label="ANIMA v5" on={animaEnabled} onToggle={onToggleAnima} hint="Emergent emotion pillars" />
               </div>
 
               <div className="settings-panel__section">

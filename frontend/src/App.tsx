@@ -20,6 +20,7 @@ import { RawChatPanel } from "./components/RawChatPanel";
 import { AutonomousResearchPanel } from "./components/AutonomousResearchPanel";
 import { EmotionNetwork } from "./components/EmotionNetwork";
 import { EmotionGenesis } from "./components/EmotionGenesis";
+import { QualiaOrb } from "./components/QualiaOrb";
 import { EmotionAvatar } from "./components/EmotionAvatar";
 import { PipelineViewer } from "./components/PipelineViewer";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -104,6 +105,7 @@ export default function App() {
   const [forecastingEnabled, setForecastingEnabled] = useState(false);
   const [advancedMode, setAdvancedMode] = useState(true);
   const [liteMode, setLiteMode] = useState(false);
+  const [animaEnabled, setAnimaEnabled] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [micEnabled, setMicEnabled] = useState(false);
   const [micReady, setMicReady] = useState(false);
@@ -111,11 +113,12 @@ export default function App() {
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [showPipeline, setShowPipeline] = useState(false);
   const [showGenesis, setShowGenesis] = useState(false);
+  const [showOrb, setShowOrb] = useState(false);
   const [showAvatar, setShowAvatar] = useState(false);
 
   // Panel limit — prevent too many panels from overflowing screen
   const MAX_DISPLAY_PANELS = 3;
-  const activePanelCount = [showEmotionSidebar, showNetwork, showPipeline, showGenesis, showAvatar].filter(Boolean).length;
+  const activePanelCount = [showEmotionSidebar, showNetwork, showPipeline, showGenesis, showOrb, showAvatar].filter(Boolean).length;
   const panelLimitReached = activePanelCount >= MAX_DISPLAY_PANELS;
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -150,6 +153,7 @@ export default function App() {
             setEmotionalState(info.emotional_state);
             setLiteMode(info.lite_mode);
             setAdvancedMode(info.advanced_mode);
+            if (info.anima_enabled !== undefined) setAnimaEnabled(info.anima_enabled);
             // Rebuild chat messages from conversation history
             const restored: ChatMessage[] = info.conversation.map((msg) => ({
               role: msg.role as "user" | "assistant",
@@ -381,6 +385,12 @@ export default function App() {
             api.toggleAdvancedMode(sessionId, false).catch(console.error);
           }
         }}
+        animaEnabled={animaEnabled}
+        onToggleAnima={() => {
+          const newVal = !animaEnabled;
+          setAnimaEnabled(newVal);
+          api.toggleAnima(sessionId, newVal).catch(console.error);
+        }}
         voiceEnabled={voiceEnabled}
         voiceLoading={voiceLoading}
         onToggleVoice={async () => {
@@ -425,6 +435,8 @@ export default function App() {
         onTogglePipeline={() => { if (showPipeline || !panelLimitReached) setShowPipeline(p => !p); }}
         showGenesis={showGenesis}
         onToggleGenesis={() => { if (showGenesis || !panelLimitReached) setShowGenesis(p => !p); }}
+        showOrb={showOrb}
+        onToggleOrb={() => { if (showOrb || !panelLimitReached) setShowOrb(p => !p); }}
         showAvatar={showAvatar}
         onToggleAvatar={() => { if (showAvatar || !panelLimitReached) setShowAvatar(p => !p); }}
         panelLimitReached={panelLimitReached}
@@ -497,10 +509,13 @@ export default function App() {
         </div>
 
         {/* Right panel: Pipeline Viewer, Network graph, Genesis */}
-        {(showPipeline || showNetwork || showGenesis || showAvatar) && !isCalibrationMode && !isSandboxMode && !isArenaMode && !isMirrorMode && !isRawMode && !isAutonomousMode && (
+        {(showPipeline || showNetwork || showGenesis || showOrb || showAvatar) && !isCalibrationMode && !isSandboxMode && !isArenaMode && !isMirrorMode && !isRawMode && !isAutonomousMode && (
           <div className="app__sidebar-right">
             {showAvatar && (
               <ErrorBoundary fallbackLabel="Avatar"><EmotionAvatar emotionalState={activeEmotionalState} analyser={audioAnalyser} speaking={isSpeaking} /></ErrorBoundary>
+            )}
+            {showOrb && (
+              <ErrorBoundary fallbackLabel="Qualia Orb"><QualiaOrb emotionalState={activeEmotionalState} metaphor={researchData?.phenomenology?.current_profile?.metaphor ?? null} /></ErrorBoundary>
             )}
             {showGenesis && (
               <ErrorBoundary fallbackLabel="Genesis"><EmotionGenesis emotionalState={activeEmotionalState} /></ErrorBoundary>

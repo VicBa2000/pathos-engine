@@ -290,6 +290,13 @@ def generate_raw_behavior_modifier(
     immune_info: str | None = None,
     narrative_info: str | None = None,
     forecast_info: str | None = None,
+    prediction_info: str | None = None,
+    workspace_info: str | None = None,
+    autobiographical_info: str | None = None,
+    development_info: str | None = None,
+    drives_info: str | None = None,
+    discovery_info: str | None = None,
+    phenomenology_info: str | None = None,
     self_inquiry: SelfInquiry | None = None,
     perception_text: str | None = None,
 ) -> str:
@@ -321,6 +328,27 @@ def generate_raw_behavior_modifier(
 
     if gut_feeling:
         parts.append(f"  Instinto visceral: {gut_feeling}")
+
+    if prediction_info:
+        parts.append(f"  {prediction_info}")
+
+    if workspace_info:
+        parts.append(f"  {workspace_info}")
+
+    if autobiographical_info:
+        parts.append(f"  {autobiographical_info}")
+
+    if development_info:
+        parts.append(f"  {development_info}")
+
+    if drives_info:
+        parts.append(f"  {drives_info}")
+
+    if discovery_info:
+        parts.append(f"  {discovery_info}")
+
+    if phenomenology_info:
+        parts.append(f"  {phenomenology_info}")
 
     # Efecto emocional RAW: blend composicional del stack o fallback a primaria
     parts.extend(["", "COMO TE SIENTES (expresalo ASI):"])
@@ -447,6 +475,13 @@ def generate_behavior_modifier(
     immune_info: str | None = None,
     narrative_info: str | None = None,
     forecast_info: str | None = None,
+    prediction_info: str | None = None,
+    workspace_info: str | None = None,
+    autobiographical_info: str | None = None,
+    development_info: str | None = None,
+    drives_info: str | None = None,
+    discovery_info: str | None = None,
+    phenomenology_info: str | None = None,
     self_inquiry: SelfInquiry | None = None,
     perception_text: str | None = None,
 ) -> str:
@@ -525,6 +560,34 @@ def generate_behavior_modifier(
     # Emotional Forecasting (optional)
     if forecast_info:
         parts.append(f"  {forecast_info}")
+
+    # Predictive Processing (Pilar 1 ANIMA — always active when warm)
+    if prediction_info:
+        parts.append(f"  {prediction_info}")
+
+    # Global Workspace (Pilar 2 ANIMA — only conscious contents)
+    if workspace_info:
+        parts.append(f"  {workspace_info}")
+
+    # Autobiographical Memory (Pilar 3 ANIMA — working memory + narratives)
+    if autobiographical_info:
+        parts.append(f"  {autobiographical_info}")
+
+    # Development (Pilar 4 ANIMA — stage-based emotional maturity)
+    if development_info:
+        parts.append(f"  {development_info}")
+
+    # Drives (Pilar 5 ANIMA — motivational autonomy)
+    if drives_info:
+        parts.append(f"  {drives_info}")
+
+    # Discovery (Pilar 6 ANIMA — emergent emotional vocabulary)
+    if discovery_info:
+        parts.append(f"  {discovery_info}")
+
+    # Phenomenology (Pilar 7 ANIMA — computational qualia)
+    if phenomenology_info:
+        parts.append(f"  {phenomenology_info}")
 
     parts.extend(["", "COMO ESTO AFECTA TU PROCESAMIENTO:"])
 

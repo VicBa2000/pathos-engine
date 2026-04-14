@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from pathos.engine.dynamics import EmotionDynamics
 from pathos.engine.mood import compute_mood_congruence_bias, update_mood
+from pathos.engine.predictive import EmotionModulation
 from pathos.models.coupling import CouplingMatrix
 from pathos.models.appraisal import AppraisalVector
 from pathos.models.emotion import BodyState, EmotionalState, Mood, PrimaryEmotion
@@ -357,6 +358,7 @@ def generate_emotion(
     contagion_valence: float = 0.0,
     contagion_arousal: float = 0.0,
     coupling: CouplingMatrix | None = None,
+    predictive_modulation: EmotionModulation | None = None,
 ) -> EmotionalState:
     """Genera un nuevo estado emocional a partir del appraisal y el estado actual.
 
@@ -373,6 +375,8 @@ def generate_emotion(
         social_intensity_mod: Modulación de intensity por social cognition.
         contagion_valence: Perturbación de contagio emocional en valence.
         contagion_arousal: Perturbación de contagio emocional en arousal.
+        coupling: CouplingMatrix para acoplamiento dimensional.
+        predictive_modulation: Modulación del Predictive Processing (Pilar 1 ANIMA).
 
     Returns:
         Nuevo EmotionalState con emotional_stack.
@@ -396,6 +400,14 @@ def generate_emotion(
 
     # Social cognition modulation
     new_valence = _clamp(new_valence + social_valence_mod, -1, 1)
+
+    # Predictive Processing modulation (Pilar 1 ANIMA)
+    # El prediction error modifica las dimensiones ANTES de la dinámica ODE,
+    # para que el sistema integre la contribución predictiva orgánicamente.
+    if predictive_modulation is not None:
+        new_valence = _clamp(new_valence + predictive_modulation.valence_delta, -1, 1)
+        new_arousal = _clamp(new_arousal + predictive_modulation.arousal_delta, 0, 1)
+        new_certainty = _clamp(new_certainty + predictive_modulation.certainty_delta, 0, 1)
 
     # Apply dynamics or lerp
     if dynamics is not None and blend_factor < 1.0:
@@ -431,10 +443,12 @@ def generate_emotion(
     # Detect emergent emotions
     emergent = detect_emergent_emotions(emotional_stack)
 
-    # Intensity (with memory + needs amplification + social modulation)
+    # Intensity (with memory + needs amplification + social modulation + predictive)
     intensity = compute_intensity(appraisal, valence, arousal)
     total_amplification = amplification + needs_amplification
     intensity = _clamp(intensity * (1 + total_amplification) + social_intensity_mod, 0, 1)
+    if predictive_modulation is not None:
+        intensity = _clamp(intensity + predictive_modulation.intensity_delta, 0, 1)
 
     # Body state
     body = compute_body_state(valence, arousal, dominance, intensity, current_state.body_state)

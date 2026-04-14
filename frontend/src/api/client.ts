@@ -379,6 +379,7 @@ export function restoreSessionInfo(sessionId: string): Promise<{
   turn_count: number;
   lite_mode: boolean;
   advanced_mode: boolean;
+  anima_enabled?: boolean;
 }> {
   return request(`/session/restore/${sessionId}`);
 }
@@ -474,6 +475,22 @@ export function toggleAdvancedMode(
   enabled: boolean,
 ): Promise<{ status: string; advanced_mode: boolean }> {
   return request(`/advanced-mode/${sessionId}`, {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+// --- ANIMA ---
+
+export function toggleAnima(
+  sessionId: string,
+  enabled: boolean,
+): Promise<{
+  status: string;
+  anima_enabled: boolean;
+  pillars: Record<string, boolean>;
+}> {
+  return request(`/anima/${sessionId}`, {
     method: "POST",
     body: JSON.stringify({ enabled }),
   });
