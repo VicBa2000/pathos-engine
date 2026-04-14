@@ -24,6 +24,13 @@ from pathos.models.calibration import CalibrationProfile, CalibrationResult
 from pathos.models.contagion import ShadowState, default_shadow_state
 from pathos.models.emotion import EmotionalState, PrimaryEmotion, neutral_state
 from pathos.models.forecasting import ForecastState, default_forecast_state
+from pathos.models.predictive import PredictiveState, default_predictive_state
+from pathos.models.workspace import ConsciousnessState, default_consciousness_state
+from pathos.models.autobio_memory import AutobiographicalState, default_autobiographical_state
+from pathos.models.development import DevelopmentState, default_development_state
+from pathos.models.drives import DrivesState, default_drives_state
+from pathos.models.discovery import DiscoveryState, default_discovery_state
+from pathos.models.phenomenology import PhenomenologyState, default_phenomenology_state
 from pathos.models.external_signals import ExternalSignalsConfig, default_signals_config
 from pathos.models.voice import VoiceConfig, default_voice_config
 from pathos.models.immune import ImmuneState, default_immune_state
@@ -69,6 +76,13 @@ class SessionState:
         self.immune: ImmuneState = default_immune_state()
         self.narrative: NarrativeSelf = default_narrative_self()
         self.forecast: ForecastState = default_forecast_state()
+        self.predictive: PredictiveState = default_predictive_state()  # Pilar 1 ANIMA: Predictive Processing
+        self.consciousness: ConsciousnessState = default_consciousness_state()  # Pilar 2 ANIMA: Global Workspace
+        self.autobiographical: AutobiographicalState = default_autobiographical_state()  # Pilar 3 ANIMA: Autobiographical Memory
+        self.development: DevelopmentState = default_development_state()  # Pilar 4 ANIMA: Desarrollo Ontogenico
+        self.drives: DrivesState = default_drives_state()  # Pilar 5 ANIMA: Autonomia Motivacional
+        self.discovery: DiscoveryState = default_discovery_state()  # Pilar 6 ANIMA: Descubrimiento Emocional
+        self.phenomenology: PhenomenologyState = default_phenomenology_state()  # Pilar 7 ANIMA: Fenomenologia Computacional
         self.voice_config: VoiceConfig = default_voice_config()
         self.signals_config: ExternalSignalsConfig = default_signals_config()
         self.last_audio: bytes | None = None  # Last TTS audio (WAV bytes)
@@ -153,6 +167,13 @@ class SessionState:
             "immune": self.immune.model_dump(),
             "narrative": self.narrative.model_dump(),
             "forecast": self.forecast.model_dump(),
+            "predictive": self.predictive.model_dump(),
+            "consciousness": self.consciousness.model_dump(),
+            "autobiographical": self.autobiographical.model_dump(),
+            "development": self.development.model_dump(),
+            "drives": self.drives.model_dump(),
+            "discovery": self.discovery.model_dump(),
+            "phenomenology": self.phenomenology.model_dump(),
             "somatic_markers": self.somatic_markers.model_dump(),
             # Non-Pydantic systems
             "memory": [m.model_dump() for m in self.memory.memories],
@@ -216,8 +237,22 @@ class SessionState:
             session.narrative = NarrativeSelf(**data["narrative"])
         if "forecast" in data:
             session.forecast = ForecastState(**data["forecast"])
+        if "predictive" in data:
+            session.predictive = PredictiveState(**data["predictive"])
+        if "consciousness" in data:
+            session.consciousness = ConsciousnessState(**data["consciousness"])
+        if "autobiographical" in data:
+            session.autobiographical = AutobiographicalState(**data["autobiographical"])
         if "somatic_markers" in data:
             session.somatic_markers = SomaticMarkerStore(**data["somatic_markers"])
+        if "development" in data:
+            session.development = DevelopmentState(**data["development"])
+        if "drives" in data:
+            session.drives = DrivesState(**data["drives"])
+        if "discovery" in data:
+            session.discovery = DiscoveryState(**data["discovery"])
+        if "phenomenology" in data:
+            session.phenomenology = PhenomenologyState(**data["phenomenology"])
 
         # Non-Pydantic: memory
         if "memory" in data:
@@ -315,6 +350,9 @@ class StateManager:
     def load_session(self, filename: str) -> tuple[str, dict[str, Any]]:
         """Carga una sesion desde un archivo en saves/.
 
+        Si la sesion tiene memoria autobiografica con baseline_adjustment
+        del sueno, aplica los ajustes al estado emocional inicial.
+
         Returns:
             (session_id, metadata dict with _model, _saved_at)
 
@@ -327,12 +365,29 @@ class StateManager:
         data = json.loads(filepath.read_text(encoding="utf-8"))
         session_id = data.get("_session_id", "restored")
         session = SessionState.from_dict(data)
+
+        # Apply dream baseline adjustment if available
+        if session.autobiographical.enabled and session.autobiographical.baseline_adjustment:
+            adj = session.autobiographical.baseline_adjustment
+            v_adj = adj.get("valence", 0.0)
+            a_adj = adj.get("arousal", 0.0)
+            mood = session.emotional_state.mood
+            new_baseline_v = max(-1.0, min(1.0, mood.baseline_valence + v_adj))
+            new_baseline_a = max(0.0, min(1.0, mood.baseline_arousal + a_adj))
+            session.emotional_state.mood.baseline_valence = round(new_baseline_v, 4)
+            session.emotional_state.mood.baseline_arousal = round(new_baseline_a, 4)
+            logger.info(
+                "Dream baseline applied: valence %+.3f -> %.3f, arousal %+.3f -> %.3f",
+                v_adj, new_baseline_v, a_adj, new_baseline_a,
+            )
+
         self._sessions[session_id] = session
         logger.info("Session loaded: %s (%d turns)", filename, session.turn_count)
         return session_id, {
             "model": data.get("_model", ""),
             "saved_at": data.get("_saved_at", ""),
             "turn_count": session.turn_count,
+            "has_dream_report": bool(session.autobiographical.last_dream_report),
         }
 
     def list_saves(self) -> list[dict[str, Any]]:

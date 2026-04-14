@@ -23,6 +23,12 @@ interface Props {
   onToggleAdvancedMode: () => void;
   liteMode: boolean;
   onToggleLiteMode: () => void;
+  animaEnabled: boolean;
+  onToggleAnima: () => void;
+  devStage: string;
+  devSpeed: string;
+  onDevStageChange: (stage: string) => void;
+  onDevSpeedChange: (speed: string) => void;
   voiceEnabled: boolean;
   voiceLoading: boolean;
   onToggleVoice: () => void;
@@ -38,6 +44,8 @@ interface Props {
   onTogglePipeline: () => void;
   showGenesis: boolean;
   onToggleGenesis: () => void;
+  showOrb: boolean;
+  onToggleOrb: () => void;
   showAvatar: boolean;
   onToggleAvatar: () => void;
   panelLimitReached: boolean;
@@ -61,9 +69,11 @@ export function ModeSelector({
   showForecasting, onToggleForecasting,
   advancedMode, onToggleAdvancedMode,
   liteMode, onToggleLiteMode,
+  animaEnabled, onToggleAnima,
+  devStage, devSpeed, onDevStageChange, onDevSpeedChange,
   voiceEnabled, voiceLoading, onToggleVoice,
   micEnabled, onToggleMic, micReady, onMicReady, onStreamReady,
-  showEmotionSidebar, onToggleEmotionSidebar, showPipeline, onTogglePipeline, showGenesis, onToggleGenesis, showAvatar, onToggleAvatar,
+  showEmotionSidebar, onToggleEmotionSidebar, showPipeline, onTogglePipeline, showGenesis, onToggleGenesis, showOrb, onToggleOrb, showAvatar, onToggleAvatar,
   panelLimitReached,
   sessionId, onNewSession, onSave, saving, onExport, onExportPortable, exporting, exportingPortable,
   currentProvider, onExitRaw, modelLocked, onExitAutonomous,
@@ -235,6 +245,7 @@ export function ModeSelector({
                   <SettingsSwitch label="Network Graph" on={showNetwork} onToggle={onToggleNetwork} disabled={!showNetwork && panelLimitReached} hint={!showNetwork && panelLimitReached ? "Max panels reached" : undefined} />
                   <SettingsSwitch label="Pipeline Viewer" on={showPipeline} onToggle={onTogglePipeline} disabled={!showPipeline && panelLimitReached} hint={!showPipeline && panelLimitReached ? "Max panels reached" : "Visual step-by-step flow"} />
                   <SettingsSwitch label="Emotion Genesis" on={showGenesis} onToggle={onToggleGenesis} disabled={!showGenesis && panelLimitReached} hint={!showGenesis && panelLimitReached ? "Max panels reached" : "Living organism view"} />
+                  <SettingsSwitch label="Qualia Orb" on={showOrb} onToggle={onToggleOrb} disabled={!showOrb && panelLimitReached} hint={!showOrb && panelLimitReached ? "Max panels reached" : "3D phenomenological orb"} />
                   <SettingsSwitch label="Emotion Avatar" on={showAvatar} onToggle={onToggleAvatar} disabled={!showAvatar && panelLimitReached} hint={!showAvatar && panelLimitReached ? "Max panels reached" : "Animated face view"} />
                   {panelLimitReached && (
                     <div className="settings-panel__limit-notice">Max 3 panels — disable one to enable another</div>
@@ -248,6 +259,24 @@ export function ModeSelector({
                 <SettingsSwitch label="Lite Mode" on={liteMode} onToggle={onToggleLiteMode} hint="1 LLM call, keyword appraisal" />
                 {!isRawMode && !isAutonomousMode && (
                   <SettingsSwitch label="Forecasting" on={showForecasting} onToggle={onToggleForecasting} hint="Predict emotional impact" />
+                )}
+                <SettingsSwitch label="ANIMA v5" on={animaEnabled} onToggle={onToggleAnima} hint="Emergent emotion pillars" />
+                {animaEnabled && (
+                  <div className="settings-panel__anima-config">
+                    <SettingsSelect label="Stage" value={devStage} onChange={onDevStageChange} hint="Emotional maturity level" options={[
+                      { value: "sensorimotor", label: "Sensorimotor (6 emotions)" },
+                      { value: "preoperational", label: "Preoperational (10 emotions)" },
+                      { value: "concrete_operational", label: "Concrete (19 emotions)" },
+                      { value: "formal_operational", label: "Formal (all systems)" },
+                      { value: "post_formal", label: "Post-Formal (wisdom)" },
+                    ]} />
+                    <SettingsSelect label="Speed" value={devSpeed} onChange={onDevSpeedChange} hint="How fast the agent grows" options={[
+                      { value: "glacial", label: "Glacial (x0.25)" },
+                      { value: "natural", label: "Natural (x1)" },
+                      { value: "accelerated", label: "Accelerated (x4)" },
+                      { value: "fast", label: "Fast (x10)" },
+                    ]} />
+                  </div>
                 )}
               </div>
 
@@ -316,6 +345,33 @@ export function ModeSelector({
       onCancel={() => setConfirmAction(null)}
     />
     </>
+  );
+}
+
+function SettingsSelect({ label, value, onChange, hint, options }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  hint?: string;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <div className="settings-switch">
+      <div className="settings-switch__info">
+        <span className="settings-switch__label">{label}</span>
+        {hint && <span className="settings-switch__hint">{hint}</span>}
+      </div>
+      <select
+        className="settings-select__input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
+    </div>
   );
 }
 

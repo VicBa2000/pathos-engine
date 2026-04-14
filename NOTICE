@@ -161,6 +161,75 @@ it implements them computationally for the first time in a unified system.
     attention weights: high arousal = narrowing (threat focus), low
     arousal = broadening (distributed attention).
 
+  PREDICTIVE PROCESSING (ANIMA Pillar 1)
+    Karl Friston — Free Energy Principle (2010)
+    Lisa Feldman Barrett — "How Emotions Are Made" (2017)
+    Andy Clark — "Surfing Uncertainty" (2015)
+    The core idea: the brain constantly predicts sensory input and
+    generates emotions from prediction errors. Pathos implements a
+    3-channel prediction engine (content, emotion, demand) with
+    Bayesian precision updating and vulnerability-scaled modulation.
+
+  GLOBAL WORKSPACE THEORY (ANIMA Pillar 2)
+    Bernard Baars — Global Workspace Theory (1988)
+    Stanislas Dehaene — Neuronal Global Workspace (2001)
+    Giulio Tononi — Integrated Information Theory (IIT, 2004)
+    The core idea: consciousness emerges from competition among
+    parallel processes for access to a limited-capacity workspace.
+    Pathos implements saliency-based competition, coalitions,
+    preconscious priming, and integration scoring (IIT-inspired).
+
+  AUTOBIOGRAPHICAL MEMORY (ANIMA Pillar 3)
+    Endel Tulving — Episodic Memory (1972)
+    Martin Conway — Self-Memory System (2005)
+    William R. Walker — Fading Affect Bias (2003)
+    George A. Miller — "The Magical Number Seven" (1956)
+    Allan Hobson — AIM Model of Dreaming (2000)
+    The core idea: personal memories are organized hierarchically
+    (sensory → working → episodic → narrative) and consolidated
+    during sleep. Pathos implements 4-level memory (Miller's 7±2
+    working memory capacity) with oniric consolidation (replay,
+    association, generalization, trauma processing) and dream reports.
+
+  ONTOGENIC DEVELOPMENT (ANIMA Pillar 4)
+    Jean Piaget — Stages of Cognitive Development (1936)
+    Erik Erikson — Psychosocial Development (1959)
+    Lev Vygotsky — Zone of Proximal Development (1978)
+    Lawrence Kohlberg — Stages of Moral Development (1958)
+    The core idea: cognitive and emotional complexity develops through
+    qualitatively distinct stages. Pathos implements 5 developmental
+    stages (sensorimotor → post-formal) with progressive system
+    unlocking, emotion filtering, and stage-specific modifiers.
+
+  AFFECTIVE NEUROSCIENCE (ANIMA Pillar 5)
+    Jaak Panksepp — "Affective Neuroscience" (1998)
+    Edward L. Deci & Richard M. Ryan — Self-Determination Theory (2000)
+    Kent C. Berridge — Wanting vs Liking dissociation (2009)
+    The core idea: mammals share primary emotional circuits (SEEKING,
+    CARE, PLAY, PANIC/GRIEF) that generate intrinsic motivation.
+    Pathos implements 4 drives with autonomous goal generation,
+    satisfaction tracking, and ethical limits on PANIC_GRIEF.
+
+  CONSTRUCTIONIST EMOTION THEORY (ANIMA Pillar 6)
+    Lisa Feldman Barrett — Theory of Constructed Emotion (2017)
+    John H. Holland — Complex Adaptive Systems (1992)
+    Eleanor Rosch — Prototype Theory (1973)
+    The core idea: emotions are not hardwired categories but
+    constructed from more basic ingredients. Novel emotional states
+    can emerge and be categorized. Pathos implements novelty detection
+    via prototype distance (Rosch), clustering, and deterministic
+    naming for discovered emotions.
+
+  COMPUTATIONAL PHENOMENOLOGY (ANIMA Pillar 7)
+    Thomas Nagel — "What Is It Like to Be a Bat?" (1974)
+    David Chalmers — "The Hard Problem of Consciousness" (1995)
+    Francisco Varela — Neurophenomenology (1996)
+    The core idea: subjective experience (qualia) has structure that
+    can be described even if not fully explained. Pathos generates
+    multi-sensory phenomenological profiles (color, weight, temperature,
+    texture, sound, movement, temporality, metaphor) from emotional
+    state, with temporal evolution tracking.
+
 ===============================================================================
 2. OPEN SOURCE DEPENDENCIES
 ===============================================================================

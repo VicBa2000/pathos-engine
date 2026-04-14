@@ -1,5 +1,5 @@
 ===============================================================================
-              PATHOS ENGINE v3 + ARK Rework - USAGE INSTRUCTIONS
+              PATHOS ENGINE v5 (ANIMA) - USAGE INSTRUCTIONS
 ===============================================================================
 
 ===============================================================================
@@ -255,6 +255,7 @@
       [Network Graph]    Toggle neural map of emotional transitions
       [Pipeline Viewer]  Toggle step-by-step emotional pipeline viewer
       [Emotion Genesis]  Toggle living organism (Canvas 2D, particles + plasma)
+      [Qualia Orb]       Toggle 3D phenomenological orb (Three.js, custom shaders)
       [Emotion Avatar]   Toggle animated face (dual mode: Painterly 2D / Realistic 3D)
 
     Engine:
@@ -262,6 +263,10 @@
                          OFF = simple pipeline, ~70% faster with Ollama
       [Lite Mode]        Toggle lite mode (1 LLM call, keyword appraisal)
       [Forecasting]      Toggle emotional impact prediction
+      [ANIMA v5]         Toggle all emergent emotion pillars (OFF by default)
+                         Activates: consciousness, autobiographical memory,
+                         development, drives, discovery, phenomenology.
+                         Predictive Processing is CORE (always on).
 
     ARK Systems (native LLM modification — Advanced mode required):
       [Self-Appraisal]   Evaluate own response against values (OFF in raw/extreme)
@@ -340,7 +345,7 @@
 
   4.3 RESEARCH MODE (investigation)
   ----------------------------------
-  Everything from Companion, plus the research panel with 16 sections:
+  Everything from Companion, plus the research panel with 23+ sections:
 
     1.  Personality — Big Five values
     2.  Temporal Dynamics — rumination/savoring/anticipation ON/OFF
@@ -368,6 +373,22 @@
     - Narrative Self — statements, coherence, crisis, growth
     - Forecasting — user estimation, impact, risk
     - Voice — mode, TTS params, ASR status, transcription
+
+    + ANIMA v5 sections (when pillars active):
+    - Predictive Processing — predicted tone/intent/emotion, surprise type,
+      precision per dimension, weight, history
+    - Global Workspace — conscious sources, integration, stability,
+      preconscious count, mood/tension influence, coalitions
+    - Autobiographical Memory — sensory snapshot, working memory items,
+      episodes stored, narratives formed, dream report status
+    - Development — stage, experience, progress %, speed, transitions,
+      pending, available emotions, available systems
+    - Drives — per-drive intensity/satisfaction/urgency, dominant drive,
+      frustration, active goals with progress, emotional impacts
+    - Discovery — vocabulary size, novel buffer, this-turn detection,
+      discovered emotions with descriptions/vectors
+    - Phenomenology — emotion, color, weight, temperature, texture,
+      sound, movement, temporality, metaphor, qualia evolution
 
     + Authenticity Metrics — coherence/continuity/proportionality/recovery
     + Behavior Prompt — complete system prompt
@@ -518,6 +539,24 @@
     - Reduces warmth x0.6 (colder), openness x0.7 (more closed)
     - Result: much more intense and uncontrolled emotions
 
+  RAW + ANIMA ADAPTATIONS (when ANIMA pillars are active):
+    Raw amplifies and uninhibits ANIMA, Extreme pushes to maximum:
+
+    Predictive Processing: Raw amplifies prediction errors x1.3.
+      Extreme amplifies x1.6 and forces maximum vulnerability.
+    Global Workspace: Raw expands capacity (8 vs 5 — less repressed).
+      Extreme floods — ALL candidates reach consciousness at once.
+    Development: Raw/Extreme bypass stage gating (all emotions and
+      systems available regardless of development stage).
+      Extreme counts experience x2 (accelerated learning).
+    Drives: Raw expresses without social filter (uninhibited).
+      Extreme: single dominant drive takes full control.
+    Discovery: Raw lowers novelty threshold (0.28 vs 0.35).
+      Extreme: minimum threshold (0.20 — maximum sensitivity).
+    Phenomenology: Raw uses visceral/corporeal templates.
+      Extreme uses maximum-intensity templates.
+    Memory: Episodes encode normally in all modes.
+
   RESET BUTTON: Destroys the session and starts clean.
 
   ISOLATED UI:
@@ -567,8 +606,8 @@
   Both share: 19 facial parameters derived from emotional state,
   smooth interpolation, blink/gestures/microexpressions/lip sync.
 
-  Max 3 display panels active simultaneously (Avatar, Genesis, Network,
-  Pipeline, Emotion Panel). Disable one to enable another.
+  Max 3 display panels active simultaneously (Avatar, Qualia Orb, Genesis,
+  Network, Pipeline, Emotion Panel). Disable one to enable another.
 
 ===============================================================================
 5. VOICE
@@ -666,13 +705,24 @@
     curl http://localhost:8000/state/advanced/default
 
 ===============================================================================
-7. THE 23 EMOTIONAL SYSTEMS
+7. THE 42 EMOTIONAL SYSTEMS
 ===============================================================================
 
-  NOTE: The 23 emotional systems include 6 basic ones (homeostasis,
+  NOTE: The 42 emotional systems include 6 basic ones (homeostasis,
   appraisal, memory, mood, calibration, metrics) that are always active,
-  and 17 advanced ones (1-16 below + Coupled Dynamics) that can be
-  disabled with the "Advanced" toggle in Settings > Engine.
+  17 advanced ones (1-16 below + Coupled Dynamics) that can be
+  disabled with the "Advanced" toggle in Settings > Engine,
+  12 ARK systems for native LLM modification, and 7 ANIMA v5
+  pillars for emergent emotions (toggled via "ANIMA v5" in Engine).
+
+  The 7 ANIMA v5 pillars are:
+    Predictive Processing (CORE — always on)
+    Global Workspace (TOGGLEABLE — default OFF)
+    Autobiographical Memory (OPT-IN — default OFF)
+    Ontogenic Development (TOGGLEABLE — default OFF)
+    Motivational Autonomy (TOGGLEABLE — default OFF)
+    Emotional Discovery (TOGGLEABLE — default OFF)
+    Computational Phenomenology (TOGGLEABLE — default OFF)
 
   CORE (Phase 4):
   1.  Emotional Stack — 19 simultaneous emotions + emergent
@@ -796,6 +846,10 @@
     - Personality (Big Five, values, identity)
     - Applied calibration
     - Configured cloud providers (API keys, URLs, models)
+    - ANIMA state: predictive precision, workspace state,
+      autobiographical episodes/narratives/dream reports,
+      development stage/experience, drives/goals,
+      discovered emotions, phenomenology profiles
 
   Via API:
     curl -X POST http://localhost:8000/session/save/mi-sesion
@@ -809,8 +863,10 @@
   The frontend detects the restored session and automatically recovers:
     - Complete message history (previous conversation)
     - Agent emotional state (stack, mood, body state)
-    - Configuration toggles (Lite Mode, Advanced Mode)
+    - Configuration toggles (Lite Mode, Advanced Mode, ANIMA v5)
   All of this happens on page load, without user intervention.
+  If autobiographical memory was active, dream consolidation runs
+  automatically before save — the dream report persists across sessions.
 
   9.3 CLEAR CHAT
   ------------------------------
@@ -861,7 +917,7 @@
 11. RUNNING TESTS
 ===============================================================================
 
-  # All tests (1358)
+  # All tests (1994)
   python -m pytest
 
   # With detail

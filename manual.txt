@@ -1,8 +1,8 @@
 ===============================================================================
-               PATHOS ENGINE v3 + ARK Rework - COMPLETE MANUAL
+               PATHOS ENGINE v5 (ANIMA) - COMPLETE MANUAL
 ===============================================================================
 
-Version: 0.5.0
+Version: 0.5.0-anima
 Date: April 2026
 Author: Victor B
 
@@ -79,7 +79,7 @@ pathos/
 │   ├── main.py                   # FastAPI app, 77 core endpoints, pipeline
 │   ├── api_routes.py             # Emotion API as a Service (7 endpoints)
 │   ├── config.py                 # Settings (env vars, models)
-│   ├── engine/                   # Emotional logic (36 modules)
+│   ├── engine/                   # Emotional logic (43 modules)
 │   │   ├── appraiser.py          # Stimulus evaluation (hybrid LLM+code)
 │   │   ├── generator.py          # Emotion generation + emotional stack
 │   │   ├── behavior.py           # LLM behavior modifier
@@ -112,7 +112,15 @@ pathos/
 │   │   ├── emotional_sampler.py  # [ARK] Sampling params from emotion
 │   │   ├── emotional_attention.py# [ARK] Attention weight modulation
 │   │   ├── emotional_prefix.py   # [ARK] Soft prefix embedding injection
-│   │   └── world_model.py        # [ARK] Predictive world model
+│   │   ├── world_model.py        # [ARK] Predictive world model
+│   │   ├── predictive.py         # [ANIMA] Predictive Processing engine
+│   │   ├── workspace.py          # [ANIMA] Global Workspace (consciousness)
+│   │   ├── autobio_memory.py     # [ANIMA] Autobiographical Memory (4 levels)
+│   │   ├── dreaming.py           # [ANIMA] Oniric consolidation (5 phases)
+│   │   ├── development.py        # [ANIMA] Ontogenic Development (gating, stages)
+│   │   ├── drives.py             # [ANIMA] Motivational Autonomy (drives, goals)
+│   │   ├── discovery.py          # [ANIMA] Emotional Discovery (novel emotions)
+│   │   └── phenomenology.py      # [ANIMA] Computational Phenomenology (qualia)
 │   ├── models/                   # Data models (Pydantic)
 │   │   ├── emotion.py            # EmotionalState, Mood, BodyState, Stack
 │   │   ├── appraisal.py          # AppraisalVector (5 dimensions)
@@ -134,7 +142,15 @@ pathos/
 │   │   ├── emotion_api.py        # Emotion API request/response models
 │   │   ├── external_signals.py   # ExternalSignal, SignalsConfig models
 │   │   ├── self_appraisal.py     # [ARK] SelfAppraisalResult
-│   │   └── world_model.py        # [ARK] WorldModelResult, PredictedImpact
+│   │   ├── world_model.py        # [ARK] WorldModelResult, PredictedImpact
+│   │   ├── predictive.py         # [ANIMA] PredictiveState, PredictionError
+│   │   ├── workspace.py          # [ANIMA] ConsciousnessState, WorkspaceResult
+│   │   ├── autobio_memory.py     # [ANIMA] AutobiographicalState, Episode
+│   │   ├── dreaming.py           # [ANIMA] DreamReport, ConsolidationResult
+│   │   ├── development.py        # [ANIMA] DevelopmentState, DevelopmentStage
+│   │   ├── drives.py             # [ANIMA] DrivesState, Drive, Goal
+│   │   ├── discovery.py          # [ANIMA] DiscoveryState, DiscoveredEmotion
+│   │   └── phenomenology.py      # [ANIMA] PhenomenologyState, QualiaRecord
 │   ├── voice/                    # Voice system (optional)
 │   │   ├── __init__.py
 │   │   ├── tts.py                # TTS router (Kokoro + Parler-TTS)
@@ -164,7 +180,7 @@ pathos/
 │   └── state/
 │       └── manager.py            # StateManager (all systems per session)
 ├── saves/                        # Session saves (JSON)
-├── tests/                        # 1358 tests (43 test files)
+├── tests/                        # 1994 tests (52 test files)
 │   ├── test_generator.py         # Emotion generation (24 tests)
 │   ├── test_behavior.py          # Behavior modifier (9 tests)
 │   ├── test_appraiser.py         # Appraisal parsing (5 tests)
@@ -190,7 +206,16 @@ pathos/
 │   ├── test_narrative.py         # Narrative Self (61 tests)
 │   ├── test_forecasting.py       # Emotional Forecasting (52 tests)
 │   ├── test_voice.py             # Voice V1 TTS (46 tests)
-│   └── test_asr.py               # Voice V2 ASR (33 tests)
+│   ├── test_asr.py               # Voice V2 ASR (33 tests)
+│   ├── test_predictive.py        # [ANIMA] Predictive Processing (69 tests)
+│   ├── test_workspace.py         # [ANIMA] Global Workspace (64 tests)
+│   ├── test_autobio_memory.py    # [ANIMA] Autobiographical Memory (78 tests)
+│   ├── test_autobio_persistence.py # [ANIMA] Memory persistence (22 tests)
+│   ├── test_dreaming.py          # [ANIMA] Oniric consolidation (66 tests)
+│   ├── test_development.py       # [ANIMA] Ontogenic Development (97 tests)
+│   ├── test_drives.py            # [ANIMA] Motivational Autonomy (92 tests)
+│   ├── test_discovery.py         # [ANIMA] Emotional Discovery (58 tests)
+│   └── test_phenomenology.py     # [ANIMA] Computational Phenomenology (90 tests)
 ├── frontend/                     # React Frontend
 │   └── src/
 │       ├── App.tsx               # Main layout, state management
@@ -210,10 +235,10 @@ pathos/
 │           ├── EmotionalStatePanel.tsx # Complete emotional panel
 │           ├── JourneyTimeline.tsx # Emotional timeline (D3.js)
 │           ├── EmotionNetwork.tsx  # Neural transition map (D3.js)
-│           ├── ResearchPanel.tsx   # Research panel (16 sections)
+│           ├── ResearchPanel.tsx   # Research panel (23+ sections)
 │           ├── CalibrationPanel.tsx# Calibration panel + export
 │           ├── ModelSelector.tsx   # LLM model selector
-│           ├── ModeSelector.tsx    # Modes + toggles (Advanced/Lite/Network/Forecast/Voice/Mic)
+│           ├── ModeSelector.tsx    # Modes + toggles (Advanced/Lite/ANIMA/Network/Forecast/Voice/Mic)
 │           ├── ExportButton.tsx    # Export to Ollama
 │           ├── AgentSetupPanel.tsx # Personality + Values + Identity config
 │           ├── MicConfigPanel.tsx  # Device selector, volume test, stream sharing
@@ -221,6 +246,7 @@ pathos/
 │           ├── VoiceOrb.tsx        # Web Audio API FFT reactive visualization
 │           ├── PipelineViewer.tsx  # Step-by-step emotional pipeline viewer
 │           ├── EmotionGenesis.tsx  # Living organism (Canvas 2D, Perlin noise, plasma)
+│           ├── QualiaOrb.tsx      # [ANIMA] 3D phenomenological orb (Three.js, custom shaders)
 │           ├── EmotionAvatar.tsx   # Avatar container with Painterly/Realistic toggle
 │           ├── PainterlyFace.tsx   # Canvas 2D semi-realistic face (detailed features)
 │           ├── RealisticFace.tsx   # Three.js WebGL 3D face (FaceCap model, morph targets)
@@ -916,6 +942,27 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   POST /raw/reset?session_id=X
     Destroys raw session completely.
 
+  ANIMA ADAPTATIONS IN RAW/EXTREME:
+    When ANIMA pillars are active, they adapt to the mode:
+    - Predictive Processing: Raw amplifies prediction error deltas x1.3.
+      Extreme amplifies x1.6 and forces vulnerability=1.0 (maximum
+      emotional impact from every prediction error).
+    - Global Workspace: Raw expands capacity to 8 (vs 5 normal — less
+      content is repressed). Extreme floods — all candidates go directly
+      to conscious (no filtering, no preconscious).
+    - Development: Raw/Extreme bypass stage gating — all emotions and
+      systems are available regardless of developmental stage.
+      Extreme counts experience x2 (accelerated learning via intensity).
+    - Drives: Raw uninhibits — drives expressed without social filter.
+      Extreme: single dominant drive (highest urgency) takes full control.
+    - Discovery: Raw lowers novelty threshold to 0.28 (vs 0.35 normal).
+      Extreme lowers to 0.20 (maximum sensitivity to novel states).
+    - Phenomenology: Raw uses visceral/corporeal templates.
+      Extreme uses maximum-intensity templates.
+    - Memory: Encodes episodes normally in all modes.
+    Rule: Raw amplifies and uninhibits ANIMA. Extreme pushes to maximum.
+    Neither mode disables ANIMA pillars — they adapt, not disappear.
+
   RESTRICTIONS:
     - Ollama-only (400 error if cloud provider active)
     - Nothing persisted: raw_mode and extreme_mode flags not in save/load
@@ -1018,7 +1065,7 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   reached, remaining toggles are disabled with "Max panels reached" hint.
   Disabling a panel always works regardless of limit.
 
-5.X EMOTION API AS A SERVICE (v3)
+5.X EMOTION API AS A SERVICE
 ---------------------------------
   Standalone API that processes stimuli through the full emotional pipeline
   WITHOUT requiring an LLM or chat interface. Any application can use Pathos
@@ -1422,7 +1469,7 @@ LEVEL 5 — PREDICTIVE & RECURRENT:
 10. TESTS
 ===============================================================================
 
-1358 tests organized by module (889 pre-ARK + 469 ARK):
+1994 tests organized by module (889 pre-ARK + 469 ARK + 636 ANIMA):
 
   CORE (181 tests):
     test_generator.py    24  Emotion generation, stack, ranges, inertia
@@ -1485,6 +1532,17 @@ LEVEL 5 — PREDICTIVE & RECURRENT:
     test_world_model.py        67  World model (3-step causal chain)
     test_emotional_prefix.py   29  Soft prefix embedding injection
 
+  ANIMA v5 — EMERGENT EMOTIONS (636 new tests):
+    test_predictive.py            69  Predictive Processing (3-channel, Bayesian)
+    test_workspace.py             64  Global Workspace (competition, coalitions)
+    test_autobio_memory.py        78  Autobiographical Memory (4-level hierarchy)
+    test_autobio_persistence.py   22  Memory persistence (cross-session)
+    test_dreaming.py              66  Oniric consolidation (5 phases)
+    test_development.py           97  Ontogenic Development (stages, gating)
+    test_drives.py                92  Motivational Autonomy (drives, goals)
+    test_discovery.py             58  Emotional Discovery (novelty, clustering)
+    test_phenomenology.py         90  Computational Phenomenology (qualia)
+
 Run all: python -m pytest
 Run one: python -m pytest tests/test_world_model.py -v
 
@@ -1524,10 +1582,21 @@ Run one: python -m pytest tests/test_world_model.py -v
              Training Infra, Conditioning Tokens, QLoRA Adapter
     469 new tests, 1358 total
 
+  ANIMA v5 (Emergent Emotions) - COMPLETE
+    Pilar 1: Predictive Processing (CORE — always on)
+    Pilar 2: Global Workspace (TOGGLEABLE)
+    Pilar 3: Autobiographical Memory + Oniric Consolidation (OPT-IN)
+    Pilar 4: Ontogenic Development (TOGGLEABLE)
+    Pilar 5: Motivational Autonomy (TOGGLEABLE)
+    Pilar 6: Emotional Discovery (TOGGLEABLE)
+    Pilar 7: Computational Phenomenology (TOGGLEABLE)
+    + Global ANIMA toggle, Qualia Orb (Three.js 3D visualization)
+    636 new tests, 1994 total
+
   PENDING:
+    Pilar 8: Embodied Autonomy (future — agent in the world)
     Voice V3 (SER) — Speech Emotion Recognition (optional)
     Voice V4 — Fluid WebSocket conversation
-    Future v4 proposals (see Futurasmejoras.txt)
 
 ===============================================================================
 12. ETHICAL CONSIDERATIONS

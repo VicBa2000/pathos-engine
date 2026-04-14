@@ -382,6 +382,137 @@ class WorldModelDetails(BaseModel):
     reason: str = ""
 
 
+class WorkspaceDetails(BaseModel):
+    """Detalles del Global Workspace (Pilar 2 ANIMA)."""
+
+    enabled: bool = False
+    conscious_sources: list[str] = []
+    conscious_contents: list[str] = []
+    preconscious_count: int = 0
+    coalitions_formed: int = 0
+    integration_score: float = 0.0
+    workspace_stability: float = 0.0
+    total_candidates: int = 0
+    filtered_noise: int = 0
+    preconscious_mood_v: float = 0.0
+    preconscious_tension: float = 0.0
+
+
+class PredictiveDetails(BaseModel):
+    """Detalles del Predictive Processing (Pilar 1 ANIMA).
+
+    Muestra predicciones generadas, error computado, precisión bayesiana
+    y estado del modelo predictivo.
+    """
+
+    # Predicciones del turno actual
+    predicted_tone: str = "neutral"
+    predicted_intent: str = "unknown"
+    predicted_valence: float = 0.0
+    predicted_arousal: float = 0.3
+    predicted_demand: str = "unknown"
+    avg_confidence: float = 0.3
+
+    # Error de predicción
+    content_error: float = 0.0
+    emotion_error: float = 0.0
+    demand_error: float = 0.0
+    total_error: float = 0.0
+    surprise_type: str = "none"
+    valence_direction: float = 0.0
+    vulnerability: float = 0.0
+
+    # Precisión bayesiana por dimensión
+    content_precision: float = 0.3
+    emotion_precision: float = 0.3
+    demand_precision: float = 0.3
+
+    # Estado del modelo
+    predictive_weight: float = 0.0
+    is_warm: bool = False
+    history_count: int = 0
+    evaluated_count: int = 0
+
+
+class AutobiographicalDetails(BaseModel):
+    """Detalles de la Memoria Autobiografica (Pilar 3 ANIMA)."""
+
+    enabled: bool = False
+    sensory_emotion: str = ""
+    sensory_intensity: float = 0.0
+    sensory_prediction_error: float = 0.0
+    working_memory_count: int = 0
+    working_memory_items: list[str] = []
+    episodic_count: int = 0
+    episodic_total_encoded: int = 0
+    episodic_high_intensity_count: int = 0
+    narrative_count: int = 0
+    narrative_strongest: list[str] = []
+    total_turns_processed: int = 0
+    has_dream_report: bool = False
+
+
+class DevelopmentDetails(BaseModel):
+    """Detalles del Desarrollo Ontogenico (Pilar 4 ANIMA)."""
+
+    enabled: bool = False
+    stage: str = "sensorimotor"
+    stage_index: int = 0
+    total_experience: int = 0
+    speed: str = "natural"
+    speed_multiplier: float = 1.0
+    initial_stage: str = "sensorimotor"
+    transition_mode: str = "auto"
+    progress_pct: float = 0.0
+    next_stage: str | None = None
+    pending_transition: str | None = None
+    transitions_completed: int = 0
+    distinct_emotions_count: int = 0
+    high_intensity_episodes: int = 0
+    regulation_uses: int = 0
+    available_systems: list[str] = []
+    available_emotions_count: int = 0
+
+
+class DrivesDetails(BaseModel):
+    """Detalles de Autonomia Motivacional (Pilar 5 ANIMA)."""
+
+    enabled: bool = False
+    drives: dict[str, dict[str, float]] = {}
+    active_goals: list[dict[str, object]] = []
+    resolved_goals: list[dict[str, object]] = []
+    updates: list[dict[str, object]] = []
+    emotional_impacts: list[dict[str, object]] = []
+    total_goals_completed: int = 0
+    total_goals_failed: int = 0
+    dominant_drive: str | None = None
+    frustration_level: float = 0.0
+
+
+class DiscoveryDetails(BaseModel):
+    """Detalles del Descubrimiento Emocional Emergente (Pilar 6 ANIMA)."""
+
+    enabled: bool = False
+    novel_count: int = 0
+    discovered_count: int = 0
+    discovered_emotions: list[dict[str, object]] = []
+    novel_detected_this_turn: bool = False
+    total_novel_detected: int = 0
+    total_emotions_discovered: int = 0
+    vocabulary_size: int = 18
+    novel_buffer_size: int = 0
+
+
+class PhenomenologyDetails(BaseModel):
+    """Detalles de la Fenomenologia Computacional (Pilar 7 ANIMA)."""
+
+    enabled: bool = False
+    current_profile: dict[str, object] | None = None
+    total_profiles_generated: int = 0
+    unique_emotions_profiled: int = 0
+    qualia_evolution: dict[str, int] = {}
+
+
 class CouplingDetails(BaseModel):
     """Detalles del acoplamiento dimensional (cross-dimensional ODE interaction)."""
 
@@ -422,6 +553,13 @@ class ResearchChatResponse(BaseModel):
     immune: ImmuneDetails
     narrative: NarrativeDetails
     forecasting: ForecastingDetails
+    predictive: PredictiveDetails
+    workspace: WorkspaceDetails
+    autobiographical: AutobiographicalDetails
+    development: DevelopmentDetails
+    drives: DrivesDetails
+    discovery: DiscoveryDetails
+    phenomenology: PhenomenologyDetails
     coupling: CouplingDetails
     self_appraisal: SelfAppraisalDetails
     world_model: WorldModelDetails
@@ -503,6 +641,13 @@ class SandboxResult(BaseModel):
     immune: ImmuneDetails
     narrative: NarrativeDetails
     forecasting: ForecastingDetails
+    predictive: PredictiveDetails = PredictiveDetails()
+    workspace: WorkspaceDetails = WorkspaceDetails()
+    autobiographical: AutobiographicalDetails = AutobiographicalDetails()
+    development: DevelopmentDetails = DevelopmentDetails()
+    drives: DrivesDetails = DrivesDetails()
+    discovery: DiscoveryDetails = DiscoveryDetails()
+    phenomenology: PhenomenologyDetails = PhenomenologyDetails()
     coupling: CouplingDetails = CouplingDetails()
 
     # Analysis

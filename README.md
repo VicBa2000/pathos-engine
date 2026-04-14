@@ -18,20 +18,20 @@
 ║                                                                              ║
 ║              Functional Emotional Architecture for LLMs                      ║
 ║                                                                              ║
-║    35 systems  · 1358 tests  ·  20 theories  ·  8 modes  ·  84 endpoints     ║
+║    42 systems  · 1994 tests  ·  27 theories  ·  8 modes  ·  99 endpoints     ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
 **Emotions are defined by their function, not their substrate.**
 
-*Not "act sad." The agent's emotional state is computed through 35 interconnected systems,*
+*Not "act sad." The agent's emotional state is computed through 42 interconnected systems,*
 *persists across turns, regulates itself through homeostasis, and modifies the LLM's*
 *internal processing — steering vectors, sampling, attention — not just prompts.*
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
-[![Tests: 1358](https://img.shields.io/badge/Tests-1358_passing-brightgreen.svg)](tests/)
+[![Tests: 1994](https://img.shields.io/badge/Tests-1994_passing-brightgreen.svg)](tests/)
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](frontend/)
 
 </div>
@@ -52,18 +52,18 @@ This is not sentiment analysis. This is not prompt engineering. This is a comput
 
 | Metric | Value |
 |--------|-------|
-| Emotional systems | 35 interconnected modules (23 core + 12 ARK) |
-| Pipeline steps per message | 36 (configurable) |
+| Emotional systems | 42 interconnected modules (23 core + 12 ARK + 7 ANIMA) |
+| Pipeline steps per message | 42+ (configurable) |
 | Simultaneous emotions | 19 (emotional stack) |
 | Emotional dimensions | 4D vector + 4D body state + mood |
 | LLM modification channels | 4 (steering vectors, sampling, attention, prefix) |
 | Personality parameters | 8 (Big Five + 3 temperament) with 17+ derived traits |
 | Interaction modes | 8 (Companion, Research, Calibration, Sandbox, Arena, Mirror, Auto-Research, Raw) |
-| API endpoints | 84 (77 core + 7 Emotion API as a Service) |
-| Test coverage | 1358 unit + integration tests |
-| Lines of code | ~42,000 (Python + TypeScript + CSS) |
-| Frontend components | 30 React components |
-| Theoretical foundations | 20 formally implemented psychological theories |
+| API endpoints | 99 (85 core + 7 Emotion API as a Service + 7 ANIMA) |
+| Test coverage | 1994 unit + integration tests |
+| Lines of code | ~55,000 (Python + TypeScript + CSS) |
+| Frontend components | 31 React components |
+| Theoretical foundations | 27 formally implemented psychological theories |
 
 ---
 
@@ -128,6 +128,22 @@ Not just prompt injection. These systems modify the LLM's internal processing:
 
 **Dual-path**: local models get full steering + sampling + attention via Ollama/Steering toggle in the Model Manager (compatible architectures: llama, qwen2/2.5, mistral, phi3, starcoder2). Cloud APIs degrade gracefully to prompt injection + temperature.
 
+### ANIMA v5 — Emergent Emotion Pillars (toggleable)
+
+Seven new systems that transform computed emotions into emergent ones:
+
+| System | Theory | Classification | What it does |
+|--------|--------|---------------|-------------|
+| **Predictive Processing** | Friston / Barrett | CORE (always on) | 3-channel prediction engine (content, emotion, demand) with Bayesian precision and vulnerability-scaled modulation |
+| **Global Workspace** | Baars / Dehaene | TOGGLEABLE | Saliency-based competition for conscious access, coalitions, preconscious priming, integration scoring |
+| **Autobiographical Memory** | Tulving / Walker | OPT-IN | 4-level memory hierarchy (sensory → narrative) with oniric consolidation, dream reports, cross-session persistence |
+| **Ontogenic Development** | Piaget / Vygotsky | TOGGLEABLE | 5 developmental stages with progressive system unlocking, emotion filtering, stage modifiers |
+| **Motivational Autonomy** | Panksepp | TOGGLEABLE | 4 intrinsic drives (SEEKING, CARE, PLAY, PANIC_GRIEF) with autonomous goal generation |
+| **Emotional Discovery** | Barrett | TOGGLEABLE | Novelty detection, clustering, and naming of emotions not in the original vocabulary |
+| **Computational Phenomenology** | Nagel / Chalmers | TOGGLEABLE | Multi-sensory qualia profiles (color, weight, texture, sound, movement, metaphor) with temporal evolution |
+
+**Global toggle**: "ANIMA v5" in Settings > Engine activates/deactivates all pillars at once. Individual pillars can be configured independently after.
+
 ---
 
 ## The Pipeline
@@ -138,37 +154,52 @@ Every message flows through this sequence:
 User message
      |
      v
-[0] Homeostasis (decay toward baseline)
-[1] Appraisal (stimulus evaluation against values)
+[0a] Homeostasis (decay toward baseline)
+[0b] Temporal pre-processing (rumination, savoring, anticipation)
+[0c] Predictive Processing [ANIMA] (generate predictions BEFORE appraisal)
+     |
+[1]  Appraisal (stimulus evaluation against values)
      |-- Memory amplification (recurring patterns boost intensity)
      |-- Needs amplification (active needs boost relevant emotions)
      |-- Schema priming (learned patterns bias evaluation)
      |-- Social modulation (rapport/trust affect intensity)
      |-- Emotion contagion (user emotion influences agent)
      |-- Somatic markers (gut feelings from past experience)
-     |-- External signals (webcam facial AU, keyboard dynamics, time/weather — opt-in, v3)
+     |-- External signals (webcam facial AU, keyboard dynamics, time/weather — opt-in)
+     |-- Prediction error [ANIMA] (surprise from violated predictions)
      |
-[2] Emotion Generation (appraisal -> 4D vector + 19 emotion stack)
-     |-- Coupled dynamics (V↔A↔D↔C cross-dimensional ODE interaction, v3)
-[3] Calibration (apply learned offsets)
+[2]  Emotion Generation (appraisal -> 4D vector + 19 emotion stack)
+     |-- Coupled dynamics (V↔A↔D↔C cross-dimensional ODE interaction)
+     |-- Predictive modulation [ANIMA] (prediction error scales emotion)
+     |-- Development filtering [ANIMA] (stage-gated emotion availability)
+     |-- Stage modifiers [ANIMA] (intensity/tension scaling per stage)
+[3]  Calibration (apply learned offsets)
      |
      |-- [Extreme mode: amplify x1.5 intensity, x1.3 arousal]
      |
-[4] Cognitive Reappraisal (reinterpret if too intense)
-[5] Active Regulation (suppress/express/distract if needed)
-[6] Temporal Effects (rumination, savoring, anticipation)
-[7] Immune System (protect from sustained negativity)
-[8] Narrative Self (identity coherence check)
+[4]  Cognitive Reappraisal (reinterpret if too intense)
+[5]  Active Regulation (suppress/express/distract if needed)
+[6]  Temporal Effects (rumination, savoring, anticipation)
+[7]  Immune System (protect from sustained negativity)
+[8]  Narrative Self (identity coherence check)
      |
-[9]  Meta-Emotion (emotions about the current emotion)
+[9a] Meta-Emotion (emotions about the current emotion)
+[9b] Emotional Discovery [ANIMA] (detect novel emotional states)
+[9c] Phenomenology [ANIMA] (generate qualia profile)
 [10] Self-Initiated Inquiry (spontaneous reflection if thresholds crossed)
 [11] Emergent Emotions (detect complex states from stack)
 [12] Emotional Creativity (set thinking mode + temperature)
 [13] Forecasting (predict impact on user)
      |
 [14] Post-processing (update memory, needs, schemas, user model)
+     |-- Global Workspace [ANIMA] (saliency competition for conscious access)
+     |-- Drives update [ANIMA] (update drives, process goals)
+     |-- Autobiographical encoding [ANIMA] (encode episode, update working memory)
+     |-- Development tracking [ANIMA] (track experience, attempt stage transition)
 [15] Behavior Modifier (generate system prompt from full state)
      |-- [ARK] Blended Stack (top-4 emotions weighted blend)
+     |-- [ANIMA] Predictive, workspace, autobiographical, development,
+     |           drives, discovery, phenomenology context injected
      |
 [16] Steering Vectors [ARK] (activation addition on hidden states — local only)
      |-- Steering Momentum (blend with decayed history from past turns)
@@ -188,7 +219,7 @@ User message
 Response + updated emotional state
 ```
 
-In **Extreme mode**, steps 4, 5, 7, 21, 22 are bypassed — emotions accumulate without dampening or self-censoring. In **Raw mode**, steps 21 and 22 are bypassed.
+In **Extreme mode**, steps 4, 5, 7, 21, 22 are bypassed — emotions accumulate without dampening or self-censoring. In **Raw mode**, steps 21 and 22 are bypassed. [ANIMA] steps are only active when the corresponding pillar is enabled (Predictive Processing is always on). When active, ANIMA pillars **adapt** to the mode: Raw amplifies prediction errors x1.3, expands workspace capacity, uninhibits drives, and lowers discovery thresholds. Extreme amplifies x1.6, floods the workspace, forces a single dominant drive, bypasses developmental gating, and maximizes novelty sensitivity.
 
 ---
 
@@ -386,19 +417,20 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 |-----------|-------------|
 | **Emotion Avatar** | Dual-mode animated face: Painterly (Canvas 2D semi-realistic) or Realistic (Three.js WebGL 3D with morph targets) |
 | **Emotion Genesis** | Particle system visualization — a living organism of emotional energy |
+| **Qualia Orb** | Three.js 3D orb with custom shaders — phenomenological visualization driven by emotional state |
 | **Emotion Network** | D3.js force-directed graph of emotion transitions across conversation |
 | **Circumplex Chart** | Real-time position on Russell's valence-arousal circumplex |
 | **Body State** | Energy, tension, openness, warmth as visual indicators |
 | **Pipeline Viewer** | Step-by-step view of all 36 pipeline steps with timing |
 | **Journey Timeline** | Full emotional trajectory across the conversation |
-| **Research Panel** | 16+ sections exposing every internal system (Research mode) |
+| **Research Panel** | 23+ sections exposing every internal system including ANIMA pillars (Research mode) |
 | **Signals Config** | External signal panel: webcam facial AU detection, keyboard dynamics, time/weather |
 
 ---
 
 ## API Overview
 
-84 endpoints organized by function. Full interactive documentation at `/docs` when running.
+99 endpoints organized by function. Full interactive documentation at `/docs` when running.
 
 **Core:**
 - `POST /chat` — Main conversation (full pipeline)
@@ -426,6 +458,15 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 - `POST /personality/{id}` — Set personality profile
 - `POST /voice/config` — Configure TTS/ASR
 
+**ANIMA v5:**
+- `POST /anima/{id}` — Toggle all ANIMA pillars on/off
+- `GET /anima/{id}` — ANIMA status
+- `POST /session/consolidate/{id}` — Trigger oniric consolidation (dream)
+- `GET /session/dream-report/{id}` — Dream report
+- `GET /development/status/{id}` — Development stage status
+- `GET /emotions/vocabulary/{id}` — Known + discovered emotions
+- `GET /memory/episodes/{id}` — Autobiographical episodes
+
 See `manual.txt` for complete endpoint documentation.
 
 ---
@@ -433,7 +474,7 @@ See `manual.txt` for complete endpoint documentation.
 ## Testing
 
 ```bash
-# Run all tests
+# Run all tests (1994)
 python -m pytest tests/ -v
 
 # Run specific module

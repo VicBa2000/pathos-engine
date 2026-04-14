@@ -379,6 +379,7 @@ export function restoreSessionInfo(sessionId: string): Promise<{
   turn_count: number;
   lite_mode: boolean;
   advanced_mode: boolean;
+  anima_enabled?: boolean;
 }> {
   return request(`/session/restore/${sessionId}`);
 }
@@ -474,6 +475,56 @@ export function toggleAdvancedMode(
   enabled: boolean,
 ): Promise<{ status: string; advanced_mode: boolean }> {
   return request(`/advanced-mode/${sessionId}`, {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+// --- ANIMA ---
+
+export function getDevelopmentStatus(
+  sessionId: string,
+): Promise<{
+  enabled: boolean;
+  current_stage: string;
+  experience_turns: number;
+  progress_percent: number;
+  speed: string;
+  available_emotions: string[];
+  available_systems: string[];
+}> {
+  return request(`/development/status/${sessionId}`);
+}
+
+export function setDevelopmentConfig(
+  sessionId: string,
+  config: {
+    speed?: string;
+    initial_stage?: string;
+  },
+): Promise<{
+  status: string;
+  enabled: boolean;
+  speed: string;
+  speed_multiplier: number;
+  current_stage: string;
+  transition_mode: string;
+}> {
+  return request(`/development/config/${sessionId}`, {
+    method: "POST",
+    body: JSON.stringify(config),
+  });
+}
+
+export function toggleAnima(
+  sessionId: string,
+  enabled: boolean,
+): Promise<{
+  status: string;
+  anima_enabled: boolean;
+  pillars: Record<string, boolean>;
+}> {
+  return request(`/anima/${sessionId}`, {
     method: "POST",
     body: JSON.stringify({ enabled }),
   });

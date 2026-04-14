@@ -19,7 +19,7 @@ export function ResearchPanel({ data }: Props) {
 
   const { appraisal, homeostasis, memory_amplification, mood_congruence, emotion_generation,
     needs, social, regulation, reappraisal, temporal, meta_emotion, schemas, personality,
-    contagion, somatic, creativity, immune, narrative, forecasting, coupling, voice,
+    contagion, somatic, creativity, immune, narrative, forecasting, predictive, workspace, autobiographical, development, drives, discovery, phenomenology, coupling, voice,
     self_appraisal, world_model, steering, emotional_prefix, attention,
     authenticity_metrics, emotional_state, emergent_emotions } = data;
 
@@ -164,6 +164,185 @@ export function ResearchPanel({ data }: Props) {
         )}
         <Row label="Stats" value={`+${narrative.total_reinforcements} / -${narrative.total_contradictions}`} />
       </Section>
+
+      {/* Predictive Processing (Pilar 1 ANIMA — always active) */}
+      {predictive && (
+        <Section title={`Predictive Processing ${predictive.is_warm ? "WARM" : "COLD"}`}>
+          <Row label="Predicted" value={`tone=${predictive.predicted_tone}, intent=${predictive.predicted_intent}`} />
+          <Row label="Pred. Emotion" value={`V=${predictive.predicted_valence.toFixed(3)} A=${predictive.predicted_arousal.toFixed(3)}`} />
+          <Row label="Demand" value={predictive.predicted_demand} />
+          <NeedBar label="Confidence" value={predictive.avg_confidence} />
+          {predictive.surprise_type !== "none" ? (
+            <>
+              <Row label="Surprise" value={`${predictive.surprise_type} (error=${predictive.total_error.toFixed(3)})`} />
+              <Row label="Direction" value={`${predictive.valence_direction >= 0 ? "+" : ""}${predictive.valence_direction.toFixed(3)} (${predictive.valence_direction > 0 ? "better" : "worse"} than expected)`} />
+              <NeedBar label="Vulnerability" value={predictive.vulnerability} />
+            </>
+          ) : (
+            <Row label="Surprise" value="none (prediction correct)" />
+          )}
+          <Row label="Precision" value={`C=${predictive.content_precision.toFixed(3)} E=${predictive.emotion_precision.toFixed(3)} D=${predictive.demand_precision.toFixed(3)}`} />
+          <NeedBar label="Weight" value={predictive.predictive_weight} />
+          <Row label="History" value={`${predictive.evaluated_count}/${predictive.history_count} evaluated`} />
+        </Section>
+      )}
+
+      {/* Global Workspace (Pilar 2 ANIMA — toggleable) */}
+      {workspace && (
+        <Section title={`Global Workspace ${workspace.enabled ? "ON" : "OFF"}`}>
+          {workspace.enabled ? (
+            <>
+              <Row label="Conscious" value={`${workspace.conscious_sources.length}/${workspace.total_candidates} candidates`} />
+              {workspace.conscious_sources.length > 0 && (
+                <Row label="Sources" value={workspace.conscious_sources.join(", ")} />
+              )}
+              {workspace.conscious_contents.map((content, i) => (
+                <Row key={i} label={workspace.conscious_sources[i] || "?"} value={content} />
+              ))}
+              <NeedBar label="Integration" value={workspace.integration_score} />
+              <NeedBar label="Stability" value={workspace.workspace_stability} />
+              {workspace.preconscious_count > 0 && (
+                <Row label="Preconscious" value={`${workspace.preconscious_count} candidates (mood_v=${workspace.preconscious_mood_v.toFixed(3)}, tension=${workspace.preconscious_tension.toFixed(3)})`} />
+              )}
+              {workspace.coalitions_formed > 0 && (
+                <Row label="Coalitions" value={`${workspace.coalitions_formed} formed`} />
+              )}
+              {workspace.filtered_noise > 0 && (
+                <Row label="Noise" value={`${workspace.filtered_noise} filtered`} />
+              )}
+            </>
+          ) : (
+            <Row label="Status" value="Disabled — enable via toggle" />
+          )}
+        </Section>
+      )}
+
+      {/* Autobiographical Memory (Pilar 3 ANIMA — OPT-IN) */}
+      {autobiographical && (
+        <Section title={`Autobiographical Memory ${autobiographical.enabled ? "ON" : "OFF"}`}>
+          {autobiographical.enabled ? (
+            <>
+              <Row label="Sensory" value={`${autobiographical.sensory_emotion} (I=${autobiographical.sensory_intensity.toFixed(2)}, PE=${autobiographical.sensory_prediction_error.toFixed(2)})`} />
+              <Row label="Working Memory" value={`${autobiographical.working_memory_count} items`} />
+              {autobiographical.working_memory_items.map((item, i) => (
+                <Row key={i} label={`WM${i + 1}`} value={item} />
+              ))}
+              <Row label="Episodes" value={`${autobiographical.episodic_count} stored (${autobiographical.episodic_total_encoded} total encoded, ${autobiographical.episodic_high_intensity_count} high-intensity)`} />
+              <Row label="Narratives" value={`${autobiographical.narrative_count} statements`} />
+              {autobiographical.narrative_strongest.map((ns, i) => (
+                <Row key={i} label={`N${i + 1}`} value={ns} />
+              ))}
+              <Row label="Turns" value={`${autobiographical.total_turns_processed} processed`} />
+              {autobiographical.has_dream_report && (
+                <Row label="Dream" value="Previous session dream report available" />
+              )}
+            </>
+          ) : (
+            <Row label="Status" value="Disabled — enable via consent toggle" />
+          )}
+        </Section>
+      )}
+
+      {/* Development (Pilar 4 ANIMA — TOGGLEABLE) */}
+      {development && (
+        <Section title={`Development ${development.enabled ? "ON" : "OFF"}`}>
+          {development.enabled ? (
+            <>
+              <Row label="Stage" value={`${development.stage} (${development.stage_index + 1}/5)`} />
+              <Row label="Experience" value={`${development.total_experience} turns`} />
+              <Row label="Progress" value={`${development.progress_pct.toFixed(1)}% to ${development.next_stage ?? "max"}`} />
+              <Row label="Speed" value={`${development.speed} (x${development.speed_multiplier})`} />
+              <Row label="Transitions" value={`${development.transitions_completed} completed`} />
+              {development.pending_transition && (
+                <Row label="Pending" value={`Ready for ${development.pending_transition}`} />
+              )}
+              <Row label="Emotions" value={`${development.available_emotions_count} available, ${development.distinct_emotions_count} experienced`} />
+              <Row label="High-Intensity" value={`${development.high_intensity_episodes} episodes`} />
+              <Row label="Regulation Uses" value={`${development.regulation_uses}`} />
+              <Row label="Systems" value={development.available_systems.join(", ")} />
+            </>
+          ) : (
+            <Row label="Status" value="Disabled — all systems active (v4 behavior)" />
+          )}
+        </Section>
+      )}
+
+      {drives && (
+        <Section title={`Drives ${drives.enabled ? "ON" : "OFF"}`}>
+          {drives.enabled ? (
+            <>
+              {Object.entries(drives.drives).map(([name, d]) => (
+                <Row key={name} label={name.toUpperCase()} value={`int=${d.intensity.toFixed(2)} sat=${d.satisfaction.toFixed(2)} urg=${d.urgency.toFixed(2)} (${d.activation_count} activations)`} />
+              ))}
+              {drives.dominant_drive && <Row label="Dominant" value={drives.dominant_drive.toUpperCase()} />}
+              <NeedBar label="Frustration" value={drives.frustration_level} />
+              {drives.active_goals.length > 0 && drives.active_goals.map((g, i) => (
+                <Row key={i} label={`Goal [${g.drive.toUpperCase()}]`} value={`${g.description} (${(g.progress * 100).toFixed(0)}%, stake=${g.stake.toFixed(2)})`} />
+              ))}
+              <Row label="Goals" value={`${drives.total_goals_completed} completed, ${drives.total_goals_failed} failed`} />
+              {drives.emotional_impacts.length > 0 && drives.emotional_impacts.map((imp, i) => (
+                <Row key={i} label={`Impact`} value={`${imp.emotion} (v${imp.valence_delta >= 0 ? "+" : ""}${imp.valence_delta.toFixed(3)}): ${imp.description}`} />
+              ))}
+            </>
+          ) : (
+            <Row label="Status" value="Disabled — no autonomous drives" />
+          )}
+        </Section>
+      )}
+
+      {discovery && (
+        <Section title={`Discovery ${discovery.enabled ? "ON" : "OFF"}`}>
+          {discovery.enabled ? (
+            <>
+              <Row label="Vocabulary" value={`${discovery.vocabulary_size} total (${discovery.discovered_count} discovered)`} />
+              <Row label="Novel Buffer" value={`${discovery.novel_buffer_size} pending`} />
+              <Row label="This Turn" value={discovery.novel_detected_this_turn ? "Novel state detected!" : "Known emotion"} />
+              <Row label="Total Novel" value={`${discovery.total_novel_detected} detected`} />
+              {discovery.discovered_emotions.length > 0 && discovery.discovered_emotions.map((e, i) => (
+                <Row key={i} label={`"${e.name}"`} value={`${e.description} (${e.frequency}x) ${e.vector}`} />
+              ))}
+            </>
+          ) : (
+            <Row label="Status" value="Disabled — fixed emotion vocabulary" />
+          )}
+        </Section>
+      )}
+
+      {phenomenology && (
+        <Section title={`Phenomenology ${phenomenology.enabled ? "ON" : "OFF"}`}>
+          {phenomenology.enabled && phenomenology.current_profile ? (
+            <>
+              <Row label="Emotion" value={phenomenology.current_profile.emotion} />
+              <Row label="Color" value={phenomenology.current_profile.color} />
+              <NeedBar label="Weight" value={phenomenology.current_profile.weight} />
+              <NeedBar label="Temperature" value={phenomenology.current_profile.temperature} />
+              {phenomenology.current_profile.texture && (
+                <Row label="Texture" value={phenomenology.current_profile.texture} />
+              )}
+              {phenomenology.current_profile.sound && (
+                <Row label="Sound" value={phenomenology.current_profile.sound} />
+              )}
+              {phenomenology.current_profile.movement && (
+                <Row label="Movement" value={phenomenology.current_profile.movement} />
+              )}
+              {phenomenology.current_profile.temporality && (
+                <Row label="Time" value={phenomenology.current_profile.temporality} />
+              )}
+              {phenomenology.current_profile.metaphor && (
+                <Row label="Metaphor" value={phenomenology.current_profile.metaphor} />
+              )}
+              <Row label="Source" value={phenomenology.current_profile.generated_by_llm ? "LLM" : "Template"} />
+              <Row label="Total Profiles" value={String(phenomenology.total_profiles_generated)} />
+              <Row label="Unique Emotions" value={String(phenomenology.unique_emotions_profiled)} />
+              {Object.keys(phenomenology.qualia_evolution).length > 0 && (
+                <Row label="Evolution" value={Object.entries(phenomenology.qualia_evolution).map(([k, v]) => `${k}(${v})`).join(", ")} />
+              )}
+            </>
+          ) : (
+            <Row label="Status" value="Disabled — numeric vectors only" />
+          )}
+        </Section>
+      )}
 
       {/* Emotional Forecasting (optional) */}
       <Section title={`Forecasting ${forecasting.enabled ? "ON" : "OFF"}`}>

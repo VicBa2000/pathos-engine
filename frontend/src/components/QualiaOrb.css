@@ -1,0 +1,49 @@
+.qualia-orb {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  background: #07070f;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.qualia-orb__canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.qualia-orb__label {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qualia-orb__metaphor {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-style: italic;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}

@@ -409,6 +409,137 @@ export interface AttentionDetails {
   words_biased: number;
 }
 
+// --- Global Workspace (Pilar 2 ANIMA) ---
+
+export interface WorkspaceDetails {
+  enabled: boolean;
+  conscious_sources: string[];
+  conscious_contents: string[];
+  preconscious_count: number;
+  coalitions_formed: number;
+  integration_score: number;
+  workspace_stability: number;
+  total_candidates: number;
+  filtered_noise: number;
+  preconscious_mood_v: number;
+  preconscious_tension: number;
+}
+
+// --- Predictive Processing (Pilar 1 ANIMA) ---
+
+export interface PredictiveDetails {
+  // Predictions
+  predicted_tone: string;
+  predicted_intent: string;
+  predicted_valence: number;
+  predicted_arousal: number;
+  predicted_demand: string;
+  avg_confidence: number;
+
+  // Prediction error
+  content_error: number;
+  emotion_error: number;
+  demand_error: number;
+  total_error: number;
+  surprise_type: string;
+  valence_direction: number;
+  vulnerability: number;
+
+  // Bayesian precision
+  content_precision: number;
+  emotion_precision: number;
+  demand_precision: number;
+
+  // Model state
+  predictive_weight: number;
+  is_warm: boolean;
+  history_count: number;
+  evaluated_count: number;
+}
+
+// --- Autobiographical Memory (Pilar 3 ANIMA) ---
+
+export interface AutobiographicalDetails {
+  enabled: boolean;
+  sensory_emotion: string;
+  sensory_intensity: number;
+  sensory_prediction_error: number;
+  working_memory_count: number;
+  working_memory_items: string[];
+  episodic_count: number;
+  episodic_total_encoded: number;
+  episodic_high_intensity_count: number;
+  narrative_count: number;
+  narrative_strongest: string[];
+  total_turns_processed: number;
+  has_dream_report: boolean;
+}
+
+export interface DevelopmentDetails {
+  enabled: boolean;
+  stage: string;
+  stage_index: number;
+  total_experience: number;
+  speed: string;
+  speed_multiplier: number;
+  initial_stage: string;
+  transition_mode: string;
+  progress_pct: number;
+  next_stage: string | null;
+  pending_transition: string | null;
+  transitions_completed: number;
+  distinct_emotions_count: number;
+  high_intensity_episodes: number;
+  regulation_uses: number;
+  available_systems: string[];
+  available_emotions_count: number;
+}
+
+export interface DrivesDetails {
+  enabled: boolean;
+  drives: Record<string, { intensity: number; satisfaction: number; urgency: number; activation_count: number }>;
+  active_goals: Array<{ drive: string; description: string; stake: number; progress: number; created_turn: number; deadline_turns: number }>;
+  resolved_goals: Array<{ drive: string; description: string; outcome: string }>;
+  updates: Array<{ drive: string; intensity_delta: number; triggered: boolean; frustration: boolean }>;
+  emotional_impacts: Array<{ emotion: string; valence_delta: number; description: string }>;
+  total_goals_completed: number;
+  total_goals_failed: number;
+  dominant_drive: string | null;
+  frustration_level: number;
+}
+
+export interface DiscoveryDetails {
+  enabled: boolean;
+  novel_count: number;
+  discovered_count: number;
+  discovered_emotions: Array<{ name: string; description: string; frequency: number; vector: string; body: string; contexts: string[] }>;
+  novel_detected_this_turn: boolean;
+  total_novel_detected: number;
+  total_emotions_discovered: number;
+  vocabulary_size: number;
+  novel_buffer_size: number;
+}
+
+export interface PhenomenologyDetails {
+  enabled: boolean;
+  current_profile: {
+    emotion: string;
+    color: string;
+    weight: number;
+    temperature: number;
+    texture: string;
+    sound: string;
+    movement: string;
+    temporality: string;
+    metaphor: string;
+    intensity: number;
+    generated_by_llm: boolean;
+  } | null;
+  total_profiles_generated: number;
+  unique_emotions_profiled: number;
+  qualia_evolution: Record<string, number>;
+}
+
 // --- External Signals ---
 
 export interface SignalSourceMeta {
@@ -476,6 +607,13 @@ export interface ResearchChatResponse {
   immune: ImmuneDetails;
   narrative: NarrativeDetails;
   forecasting: ForecastingDetails;
+  predictive: PredictiveDetails;
+  workspace: WorkspaceDetails;
+  autobiographical: AutobiographicalDetails;
+  development: DevelopmentDetails;
+  drives: DrivesDetails;
+  discovery: DiscoveryDetails;
+  phenomenology: PhenomenologyDetails;
   coupling: CouplingDetails;
   voice: VoiceDetails;
 
@@ -551,6 +689,13 @@ export interface SandboxResult {
   immune: ImmuneDetails;
   narrative: NarrativeDetails;
   forecasting: ForecastingDetails;
+  predictive: PredictiveDetails;
+  workspace: WorkspaceDetails;
+  autobiographical: AutobiographicalDetails;
+  development: DevelopmentDetails;
+  drives: DrivesDetails;
+  discovery: DiscoveryDetails;
+  phenomenology: PhenomenologyDetails;
   coupling: CouplingDetails;
 
   // Analysis
