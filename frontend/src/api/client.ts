@@ -482,6 +482,40 @@ export function toggleAdvancedMode(
 
 // --- ANIMA ---
 
+export function getDevelopmentStatus(
+  sessionId: string,
+): Promise<{
+  enabled: boolean;
+  current_stage: string;
+  experience_turns: number;
+  progress_percent: number;
+  speed: string;
+  available_emotions: string[];
+  available_systems: string[];
+}> {
+  return request(`/development/status/${sessionId}`);
+}
+
+export function setDevelopmentConfig(
+  sessionId: string,
+  config: {
+    speed?: string;
+    initial_stage?: string;
+  },
+): Promise<{
+  status: string;
+  enabled: boolean;
+  speed: string;
+  speed_multiplier: number;
+  current_stage: string;
+  transition_mode: string;
+}> {
+  return request(`/development/config/${sessionId}`, {
+    method: "POST",
+    body: JSON.stringify(config),
+  });
+}
+
 export function toggleAnima(
   sessionId: string,
   enabled: boolean,

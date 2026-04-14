@@ -442,3 +442,30 @@
 .settings-switch__hint--loading {
   color: #6a6acc;
 }
+
+/* ANIMA development config */
+.settings-panel__anima-config {
+  padding: 4px 0 2px 8px;
+  border-left: 2px solid #2a2a4a;
+  margin: 2px 0 4px 6px;
+}
+
+.settings-select__input {
+  background: #1a1a2e;
+  color: #bbc;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.settings-select__input:hover {
+  border-color: #4a4a7a;
+}
+
+.settings-select__input:focus {
+  border-color: #6a6acc;
+}

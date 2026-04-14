@@ -5745,7 +5745,7 @@ async def development_set_config(session_id: str, body: dict) -> dict:
         dev.config.speed_multiplier = max(0.1, min(20.0, float(body["speed_multiplier"])))
         dev.config.speed = DevelopmentSpeed.CUSTOM
 
-    if "initial_stage" in body and not was_enabled and dev.enabled:
+    if "initial_stage" in body:
         try:
             stage = DevelopmentStage(body["initial_stage"])
             dev.config.initial_stage = stage

@@ -106,6 +106,8 @@ export default function App() {
   const [advancedMode, setAdvancedMode] = useState(true);
   const [liteMode, setLiteMode] = useState(false);
   const [animaEnabled, setAnimaEnabled] = useState(false);
+  const [devStage, setDevStage] = useState("sensorimotor");
+  const [devSpeed, setDevSpeed] = useState("natural");
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [micEnabled, setMicEnabled] = useState(false);
   const [micReady, setMicReady] = useState(false);
@@ -153,7 +155,15 @@ export default function App() {
             setEmotionalState(info.emotional_state);
             setLiteMode(info.lite_mode);
             setAdvancedMode(info.advanced_mode);
-            if (info.anima_enabled !== undefined) setAnimaEnabled(info.anima_enabled);
+            if (info.anima_enabled !== undefined) {
+              setAnimaEnabled(info.anima_enabled);
+              if (info.anima_enabled) {
+                api.getDevelopmentStatus(restoreId).then((s) => {
+                  setDevStage(s.current_stage);
+                  setDevSpeed(s.speed);
+                }).catch(console.error);
+              }
+            }
             // Rebuild chat messages from conversation history
             const restored: ChatMessage[] = info.conversation.map((msg) => ({
               role: msg.role as "user" | "assistant",
@@ -389,7 +399,28 @@ export default function App() {
         onToggleAnima={() => {
           const newVal = !animaEnabled;
           setAnimaEnabled(newVal);
-          api.toggleAnima(sessionId, newVal).catch(console.error);
+          api.toggleAnima(sessionId, newVal).then(() => {
+            if (newVal) {
+              api.getDevelopmentStatus(sessionId).then((s) => {
+                setDevStage(s.current_stage);
+                setDevSpeed(s.speed);
+              }).catch(console.error);
+            }
+          }).catch(console.error);
+        }}
+        devStage={devStage}
+        devSpeed={devSpeed}
+        onDevStageChange={(stage) => {
+          setDevStage(stage);
+          api.setDevelopmentConfig(sessionId, { initial_stage: stage }).then((res) => {
+            setDevStage(res.current_stage);
+          }).catch(console.error);
+        }}
+        onDevSpeedChange={(speed) => {
+          setDevSpeed(speed);
+          api.setDevelopmentConfig(sessionId, { speed }).then((res) => {
+            setDevSpeed(res.speed);
+          }).catch(console.error);
         }}
         voiceEnabled={voiceEnabled}
         voiceLoading={voiceLoading}
