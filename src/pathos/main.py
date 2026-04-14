@@ -83,6 +83,7 @@ from pathos.engine.development import (
     filter_emotions_by_stage,
     get_development_details,
     get_development_prompt,
+    is_emotion_available,
     is_system_available,
     track_experience,
 )
