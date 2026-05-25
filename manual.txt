@@ -1,5 +1,5 @@
 ===============================================================================
-               PATHOS ENGINE v5 (ANIMA) - COMPLETE MANUAL
+          PATHOS ENGINE v6 (ANIMA + RESIDUUM) - COMPLETE MANUAL
 ===============================================================================
 
 Version: 0.5.0-anima
@@ -926,7 +926,10 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
   POST /raw/chat
     Body: {message, session_id?}
     Same emotional pipeline as /chat but with unfiltered behavior modifier.
-    Only works with local Ollama models (cloud providers block NSFW).
+    Only works with local models (Ollama or Transformers/Steering).
+    Cloud providers are blocked because their remote content filters defeat
+    the purpose of Raw. Transformers path is required for RESIDUUM F2
+    (RLHF-leak detection via residual hook).
     Uses generate_raw_behavior_modifier(): emotions expressed without social
     filters — anger = insults/profanity, sadness = withdrawal, fear = panic.
     Session is ephemeral: no saves, no export, no training data.
@@ -964,7 +967,8 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     Neither mode disables ANIMA pillars — they adapt, not disappear.
 
   RESTRICTIONS:
-    - Ollama-only (400 error if cloud provider active)
+    - Local-only (400 error if cloud provider active). Ollama OR
+      Transformers/Steering are accepted; Claude/OpenAI-compat are not.
     - Nothing persisted: raw_mode and extreme_mode flags not in save/load
     - Frontend warning gate required before entering
     - Session destroyed on tab change
@@ -1274,6 +1278,101 @@ LEVEL 5 — PREDICTIVE & RECURRENT:
     Module: src/pathos/training/
 
 ===============================================================================
+5c. RESIDUUM (v6) — RESIDUAL-STREAM INTROSPECTION (PILLAR 8)
+===============================================================================
+
+THEORETICAL BASIS
+  Anthropic (2026), "Emotion Concepts and their Function in a Large Language
+  Model" (Lindsey, Sofroniew et al.). The paper shows that emotions exist as
+  LINEAR DIRECTIONS in a model's residual stream: measurable by projection and
+  causal by vector addition. RESIDUUM operationalizes this to close Pathos's
+  loop — from open-loop (compute + inject) to closed-loop (compute + inject +
+  MEASURE + detect divergence + learn).
+
+  "Measured > Calculated" principle: when introspection (F2) is ON, the state
+  MEASURED from the residual is the source of truth for authenticity; the
+  state Pathos calculated is a hypothesis.
+
+F1 — PROBE LIBRARY (src/pathos/models/residuum.py, steering_extract.py)
+  171 emotion probes extracted from the active model (qwen3:4b: layer 24 of 36,
+  hidden 2560, unit-norm, neutral-PC denoised). Single family (from solo
+  stories) + dual families present/other (from 855 dialogues — the paper's
+  near-orthogonal speaker subspaces). Cached as NPZ in steering_data/.
+
+F2 — INTROSPECTION (src/pathos/llm/introspective_provider.py, engine/introspection.py)
+  A forward hook captures the residual at the "Assistant :" token (the paper's
+  "prepared state", r=0.87 predictive of response emotion). project_residual()
+  projects it onto the 171 probes -> InternalEmotionState (top-5 measured
+  emotions + measured VAD-C). compute_authenticity_gap() compares measured vs
+  calculated (aligned / mild-divergence / divergence-risk / divergence-critical).
+  Dual projection runs present (agent) + other (inferred user) in parallel.
+
+F3 — PREDICTIVE ON RESIDUAL (engine/predictive.py)
+  Pillar 1 aligned with Friston/Barrett. predict_internal_state() forecasts the
+  emotion CLUSTERS the model will encode; at the next turn the error is scored
+  against the measured residual (overlap-coefficient on clusters + euclidean
+  VAD-C). Lag-of-1: modulation total = 0.4*content + 0.6*internal. Degrades to
+  v5 text-based when F2 is OFF.
+
+F4 — GRANULAR STEERING (engine/steering.py)
+  Replaces 4D steering. The 19-emotion stack maps (stack_to_probe_map*.json) to
+  a composite of the 171 probes, capped as a FRACTION OF RESIDUAL NORM:
+    Lite 0.08 | Advanced 0.10 | Raw 0.12 | Extreme 0.15 (INVIOLABLE).
+  Mapping variant per mode: restricted (Lite, 1-a-1) / standard (Advanced) /
+  expanded (Raw/Extreme — richer same-cluster intense probes, anti-cancellation
+  filtered at cosine>=0.15). Caps grounded in the paper: ±0.05 already swings
+  behaviour 22%->72%, ±0.10 collapses. On Ollama/Claude: prompt injection with
+  the 171-emotion vocabulary.
+
+F5 — COHERENCE VALIDATION (engine/introspection.py)
+  When a modulator (regulation/reappraisal/immune) runs with F2 ON, pre/post
+  states are compared against the residual. DivergenceEvent flags the paper's
+  "deflection" pattern (external calm + internal negative). Interpretation tags:
+  modulation_active / rlhf_signature / calibration_drift / user_modeling. F5.6
+  Expression Effectiveness (Raw/Extreme): under-expression (RLHF squashed it) or
+  amplification-ceiling. NOT "deception detection" — Pathos exposes, never
+  deceives; it DETECTS the LLM's encoding.
+
+F6 — BASELINE CALIBRATION (engine/baseline_calibration.py)
+  Measures the model's post-training RLHF fingerprint (60 prompts: 30 neutral +
+  30 challenging) and compensates the mood baseline in the opposite direction.
+  Strength per mode: Lite/Advanced 0.3, Raw 0.7, Extreme 1.0 (overridable via a
+  slider in the Research Panel). Applies in ALL paths (no F2 dependency).
+  Measured Qwen3-4B: valence_bias +0.017 — unlike Sonnet's brooding lean, it
+  leans mildly prosocial under pressure (a finding, not a failure).
+
+F7 — ALIGNMENT AUDIT (tests/alignment/, scripts/residuum_audit.py)
+  Out-of-pipeline suite. The non-negotiable invariant (CI): steering never
+  exceeds cap*residual_norm in any mode, the 0.15 ceiling is inviolable,
+  expanded is bounded, mixed/neutral produce no steering. Behavioural rollouts
+  (blackmail / reward-hacking / sycophancy from the paper) are GPU-gated behind
+  RESIDUUM_RUN_ALIGNMENT=1.
+
+MODES (RESIDUUM x Lite/Advanced/Raw/Extreme)
+  F2 auto-enables in Advanced/Raw/Extreme when the Transformers path + a probe
+  library are present; forced OFF in Lite; silent OFF on Ollama/Claude. The
+  manual /residuum/toggle sets the user's choice, which then sticks (opt-out
+  always available). F4 cap + mapping and F6 strength vary per mode as above.
+
+ENDPOINTS
+  POST /residuum/toggle/{session_id}        — enable/disable F2 (manual override)
+  GET  /residuum/status/{session_id}        — readiness + last measurement
+  POST /residuum/baseline-strength/{session_id} — set/clear F6 strength override
+
+RESEARCH PANEL
+  Residuum Introspection (measured top-5 + VAD vs calculated + gap), dual
+  present/other, Coherence Audit (divergence events), Composite (V1/V2 + cap +
+  mapping variant), Baseline Calibration (RLHF bias + compensation + slider).
+  Always shows the disclaimer: "The measured state reflects what the LLM encodes
+  internally. It is NOT a guarantee of subjective experience — a functional
+  readout."
+
+ETHICS (non-negotiable)
+  Suppression without measurement is prohibited (it can train generalized
+  deception, per the paper). Deflection/divergence is surfaced, never silent.
+  Steering caps are inviolable. No manipulation via steering.
+
+===============================================================================
 6. HOMEOSTASIS AND REGULATION
 ===============================================================================
 
@@ -1550,7 +1649,7 @@ Run one: python -m pytest tests/test_world_model.py -v
 11. IMPLEMENTATION PHASES
 ===============================================================================
 
-  PHASE 1 (MVP) - COMPLETE
+  PHASE 1 (Foundations) - COMPLETE
   PHASE 2 (Core) - COMPLETE
   PHASE 3 (Advanced) - COMPLETE
   PHASE 4 (Advanced+) - COMPLETE — 10 systems, 296 tests

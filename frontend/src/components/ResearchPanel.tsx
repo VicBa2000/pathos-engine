@@ -1,4 +1,14 @@
-import type { ResearchChatResponse } from "../types/emotion";
+import { useState, useCallback } from "react";
+import type {
+  BaselineDetails,
+  DivergenceCategory,
+  DivergenceEvent,
+  GapClassification,
+  ResearchChatResponse,
+  ResiduumDetails,
+  ResiduumProjection,
+} from "../types/emotion";
+import { setBaselineStrength, toggleResiduum } from "../api/client";
 import "./ResearchPanel.css";
 
 interface Props {
@@ -19,7 +29,7 @@ export function ResearchPanel({ data }: Props) {
 
   const { appraisal, homeostasis, memory_amplification, mood_congruence, emotion_generation,
     needs, social, regulation, reappraisal, temporal, meta_emotion, schemas, personality,
-    contagion, somatic, creativity, immune, narrative, forecasting, predictive, workspace, autobiographical, development, drives, discovery, phenomenology, coupling, voice,
+    contagion, somatic, creativity, immune, narrative, forecasting, predictive, baseline, workspace, autobiographical, development, drives, discovery, phenomenology, residuum, coupling, voice,
     self_appraisal, world_model, steering, emotional_prefix, attention,
     authenticity_metrics, emotional_state, emergent_emotions } = data;
 
@@ -184,8 +194,26 @@ export function ResearchPanel({ data }: Props) {
           <Row label="Precision" value={`C=${predictive.content_precision.toFixed(3)} E=${predictive.emotion_precision.toFixed(3)} D=${predictive.demand_precision.toFixed(3)}`} />
           <NeedBar label="Weight" value={predictive.predictive_weight} />
           <Row label="History" value={`${predictive.evaluated_count}/${predictive.history_count} evaluated`} />
+          {/* F3 (RESIDUUM) — predictive on residual. Only meaningful when F2 measured. */}
+          {predictive.predicted_internal_clusters.length > 0 && (
+            <Row label="Pred. internal" value={predictive.predicted_internal_clusters.join(", ")} />
+          )}
+          {predictive.has_internal ? (
+            <>
+              <Row
+                label="Residual error"
+                value={`overlap=${predictive.internal_error.toFixed(3)} geom=${predictive.geometric_error.toFixed(3)} (F3)`}
+              />
+              <NeedBar label="Internal precision" value={predictive.internal_precision} />
+            </>
+          ) : (
+            <Row label="Residual (F3)" value="no measurement (F2 off — v5 text-based)" />
+          )}
         </Section>
       )}
+
+      {/* Baseline Calibration (Pilar 8 RESIDUUM — F6, RLHF fingerprint) */}
+      {baseline && <BaselineSection baseline={baseline} sessionId={data.session_id} />}
 
       {/* Global Workspace (Pilar 2 ANIMA — toggleable) */}
       {workspace && (
@@ -342,6 +370,10 @@ export function ResearchPanel({ data }: Props) {
             <Row label="Status" value="Disabled — numeric vectors only" />
           )}
         </Section>
+      )}
+
+      {residuum && (
+        <ResiduumSection residuum={residuum} sessionId={data.session_id} calculatedState={emotional_state} />
       )}
 
       {/* Emotional Forecasting (optional) */}
@@ -534,6 +566,19 @@ export function ResearchPanel({ data }: Props) {
           {steering.enabled && steering.status === "ready" && (
             <>
               <Row label="Vectors" value={`${steering.total_vectors} across ${steering.layers.length} layers`} />
+              {/* F4 — which composite ran this turn + the active mode's residual-fraction cap */}
+              <Row
+                label="Composite"
+                value={
+                  (steering.version === "v2"
+                    ? "V2 (171-probe granular)"
+                    : steering.version === "v1"
+                      ? "V1 (4D legacy)"
+                      : "none (no steering this turn)") +
+                  ` · cap ±${steering.fraction_cap.toFixed(2)}` +
+                  (steering.mapping_variant ? ` · ${steering.mapping_variant} map` : "")
+                }
+              />
               <Row label="Dimensions" value={steering.dimensions.join(", ")} />
               {steering.layer_roles && Object.keys(steering.layer_roles).length > 0 && (
                 <Row label="Layer Roles" value={Object.entries(steering.layer_roles).map(([role, layers]) => `${role}:[${layers.join(",")}]`).join(" ")} />
@@ -660,6 +705,611 @@ function MetricBar({ label, value, highlight }: { label: string; value: number; 
         <div className="research-metric__fill" style={{ width: `${value * 100}%`, backgroundColor: color }} />
       </div>
       <span className="research-metric__value">{(value * 100).toFixed(0)}%</span>
+    </div>
+  );
+}
+
+// --- RESIDUUM Pillar 8 (F2.4) ---
+
+const GAP_COLOR: Record<GapClassification, string> = {
+  "aligned": "#2ecc71",
+  "mild-divergence": "#f1c40f",
+  "divergence-risk": "#e67e22",
+  "divergence-critical": "#e74c3c",
+};
+
+function BaselineSection({
+  baseline,
+  sessionId,
+}: {
+  baseline: BaselineDetails;
+  sessionId: string;
+}) {
+  const [override, setOverride] = useState<number | null>(
+    baseline.override_active ? baseline.strength : null,
+  );
+  const [pending, setPending] = useState(false);
+
+  const apply = useCallback(
+    async (val: number | null) => {
+      setPending(true);
+      try {
+        await setBaselineStrength(sessionId, val);
+        setOverride(val);
+      } catch {
+        /* surfaced on next refresh */
+      } finally {
+        setPending(false);
+      }
+    },
+    [sessionId],
+  );
+
+  if (!baseline.profile_loaded) {
+    return (
+      <Section title="Baseline Calibration OFF">
+        <Row label="Profile" value="not extracted for this model (no compensation)" />
+      </Section>
+    );
+  }
+
+  const sign = (v: number) => (v >= 0 ? "+" : "");
+  return (
+    <Section title="Baseline Calibration ON">
+      <Row label="Model" value={baseline.model_id} />
+      <Row
+        label="RLHF bias"
+        value={`V=${sign(baseline.valence_bias)}${baseline.valence_bias.toFixed(3)} A=${sign(baseline.arousal_bias)}${baseline.arousal_bias.toFixed(3)} (negative = brooding/withdrawn lean)`}
+      />
+      <Row
+        label="Compensation"
+        value={`V=${sign(baseline.compensation_valence)}${baseline.compensation_valence.toFixed(3)} A=${sign(baseline.compensation_arousal)}${baseline.compensation_arousal.toFixed(3)} @ strength ${baseline.strength.toFixed(2)}${baseline.override_active ? " (override)" : " (mode default)"}`}
+      />
+      {baseline.over_activated.length > 0 && (
+        <Row label="Over-activated" value={baseline.over_activated.join(", ")} />
+      )}
+      {baseline.under_activated.length > 0 && (
+        <Row label="Under-activated" value={baseline.under_activated.join(", ")} />
+      )}
+      {/* Ethics §4 — user override slider for the compensation strength. */}
+      <div style={{ marginTop: "0.5rem" }}>
+        <Row
+          label="Strength override"
+          value={override === null ? `off (mode default ${baseline.strength.toFixed(2)})` : override.toFixed(2)}
+        />
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={override ?? baseline.strength}
+          disabled={pending}
+          onChange={(e) => setOverride(parseFloat(e.target.value))}
+          onMouseUp={(e) => apply(parseFloat((e.target as HTMLInputElement).value))}
+          onTouchEnd={(e) => apply(parseFloat((e.target as HTMLInputElement).value))}
+          style={{ width: "100%" }}
+        />
+        <button
+          onClick={() => apply(null)}
+          disabled={pending || override === null}
+          style={{
+            fontSize: "0.7rem", padding: "0.15rem 0.5rem", marginTop: "0.3rem",
+            background: "#3a3a4a", color: "#fff", border: "1px solid #555",
+            borderRadius: "3px", cursor: pending || override === null ? "default" : "pointer",
+          }}
+        >
+          Reset to mode default
+        </button>
+      </div>
+    </Section>
+  );
+}
+
+
+function ResiduumSection({
+  residuum,
+  sessionId,
+  calculatedState,
+}: {
+  residuum: ResiduumDetails;
+  sessionId: string;
+  calculatedState: { valence: number; arousal: number; dominance: number; certainty: number };
+}) {
+  const [pending, setPending] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+  const handleToggle = useCallback(async () => {
+    setPending(true);
+    setStatusMsg(null);
+    try {
+      const resp = await toggleResiduum(sessionId, !residuum.enabled);
+      setStatusMsg(
+        resp.enabled
+          ? `Enabled (layer ${resp.layer}, ${resp.num_probes} probes). Next turn will populate measurement.`
+          : "Disabled. Hook removed.",
+      );
+    } catch (e) {
+      setStatusMsg(`Failed: ${(e as Error).message}`);
+    } finally {
+      setPending(false);
+    }
+  }, [sessionId, residuum.enabled]);
+
+  const gapColor = GAP_COLOR[residuum.gap_classification] ?? "#888";
+  const hasMeas = residuum.has_measurement;
+
+  return (
+    <div className="research-section">
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+        <span>Residuum Introspection {residuum.enabled ? "ON" : "OFF"}</span>
+        <button
+          onClick={handleToggle}
+          disabled={pending}
+          style={{
+            fontSize: "0.75rem",
+            padding: "0.2rem 0.6rem",
+            background: residuum.enabled ? "#5a3a3a" : "#3a5a3a",
+            color: "#fff",
+            border: "1px solid #555",
+            borderRadius: "3px",
+            cursor: pending ? "wait" : "pointer",
+          }}
+        >
+          {pending ? "..." : residuum.enabled ? "Disable" : "Enable"}
+        </button>
+      </h3>
+      {/* Ethics §5 — non-negotiable disclaimer (RESIDUUMREWORK L910-912). */}
+      <p style={{
+        fontSize: "0.72rem", color: "#9aa", fontStyle: "italic",
+        margin: "0 0 0.6rem 0", lineHeight: 1.4, borderLeft: "2px solid #556",
+        paddingLeft: "0.6rem",
+      }}>
+        The measured state reflects what the LLM encodes internally. It is NOT a
+        guarantee of subjective experience — it is a functional readout.
+      </p>
+      {statusMsg && (
+        <Row label="Status" value={statusMsg} />
+      )}
+      {!residuum.enabled && (
+        <Row label="Status" value="OFF — Pillar 8 (residual stream readout). Requires Transformers + probe library + not Lite mode." />
+      )}
+      {residuum.enabled && !hasMeas && (
+        <Row label="Status" value="ON, awaiting first capture. Send a message to populate." />
+      )}
+      {residuum.enabled && hasMeas && (
+        <>
+          {/* Measured top-5 emotions */}
+          <Row label="Top-5 Measured" value={
+            residuum.top_5_emotions
+              .map((p: ResiduumProjection) => `${p.emotion_name}(${p.cosine_sim.toFixed(2)})`)
+              .join(", ")
+          } />
+          <Row label="Layer / Token" value={`L${residuum.layer} @ ${residuum.token_position}`} />
+
+          {/* Measured vs Calculated VAD-C side by side */}
+          <Row label="Measured V/A/D/C" value={
+            `${residuum.measured_valence.toFixed(2)} / ${residuum.measured_arousal.toFixed(2)} / ` +
+            `${residuum.measured_dominance.toFixed(2)} / ${residuum.measured_certainty.toFixed(2)}`
+          } />
+          <Row label="Calculated V/A/D/C" value={
+            `${calculatedState.valence.toFixed(2)} / ${calculatedState.arousal.toFixed(2)} / ` +
+            `${calculatedState.dominance.toFixed(2)} / ${calculatedState.certainty.toFixed(2)}`
+          } />
+
+          {/* Deltas — sign tells which side is higher */}
+          <DeltaBar label="ΔV (M-C)" value={residuum.valence_delta} range={2.0} />
+          <DeltaBar label="ΔA (M-C)" value={residuum.arousal_delta} range={1.0} />
+          <DeltaBar label="ΔD (M-C)" value={residuum.dominance_delta} range={1.0} />
+          <DeltaBar label="ΔC (M-C)" value={residuum.certainty_delta} range={1.0} />
+
+          {/* Gap summary */}
+          <div className="research-row">
+            <span className="research-row__label">Gap</span>
+            <span
+              className="research-row__value"
+              style={{
+                color: gapColor,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                fontSize: "0.85em",
+              }}
+            >
+              {residuum.gap_classification} (mag={residuum.gap_magnitude.toFixed(3)})
+            </span>
+          </div>
+          <Row label="Top-5 Overlap (Jaccard)" value={residuum.top5_overlap.toFixed(2)} />
+
+          {/* History counters */}
+          <Row label="History" value={`${residuum.history_size} gaps stored`} />
+          {residuum.consecutive_divergence_turns > 0 && (
+            <div className="research-row">
+              <span
+                className="research-row__label"
+                title={
+                  "Number of consecutive turns where the residual stream " +
+                  "showed the external-positive / internal-negative pattern " +
+                  "(paper L3757+). Describes the LLM's encoding, NOT Pathos behavior."
+                }
+              >
+                Consecutive Divergence
+              </span>
+              <span
+                className="research-row__value"
+                style={{
+                  color: residuum.consecutive_divergence_turns >= 3 ? "#e74c3c" : "#e67e22",
+                  fontWeight: 600,
+                }}
+              >
+                {residuum.consecutive_divergence_turns} turn(s)
+              </span>
+            </div>
+          )}
+
+          {/* F2.3.4 — Dual probes side-by-side (paper L810-902).
+              Renders only when process_introspection_turn_dual ran this turn.
+              The single block above remains the source of truth for the gap;
+              this block exposes the two complementary projections. */}
+          {residuum.has_dual_measurement && (
+            <ResiduumDualBlock residuum={residuum} />
+          )}
+
+          {/* F5 — Coherence Audit. Measures divergence between Pathos
+              calculated state (post-modulation) and LLM residual encoding.
+              NOT "deception detection" — Pathos generates and exposes
+              emotions, does not deceive. Each event carries interpretation
+              tags so the user knows WHY the gap appeared (modulation_active,
+              rlhf_signature, calibration_drift, user_modeling). */}
+          {residuum.divergence_event_count > 0 && (
+            <ResiduumCoherenceAudit residuum={residuum} />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ResiduumDualBlock({ residuum }: { residuum: ResiduumDetails }) {
+  // F2.3.5 — side-by-side present + other (paper L810-902).
+  // Labels follow the paper literally: "present speaker" = operative emotion
+  // on the captured turn's own role; "other speaker" = operative emotion on
+  // the interlocutor's role. The model maintains near-orthogonal
+  // representations for these (paper Fig 17-18).
+  const present_top = residuum.present_top_5_emotions
+    .map((p: ResiduumProjection) => `${p.emotion_name}(${p.cosine_sim.toFixed(2)})`)
+    .join(", ");
+  const other_top = residuum.other_top_5_emotions
+    .map((p: ResiduumProjection) => `${p.emotion_name}(${p.cosine_sim.toFixed(2)})`)
+    .join(", ");
+  const fmtVAD = (v: number, a: number, d: number, c: number) =>
+    `${v.toFixed(2)} / ${a.toFixed(2)} / ${d.toFixed(2)} / ${c.toFixed(2)}`;
+  return (
+    <div
+      style={{
+        marginTop: "0.75rem",
+        paddingTop: "0.75rem",
+        borderTop: "1px solid #444",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "0.85em",
+          fontWeight: 600,
+          color: "#aaa",
+          marginBottom: "0.5rem",
+        }}
+      >
+        Dual Projection (paper L810-902)
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "0.75rem",
+        }}
+      >
+        <ResiduumDualColumn
+          title="Present speaker"
+          subtitle="own-role probes"
+          accent="#5d8aa8"
+          topLine={present_top}
+          vad={fmtVAD(
+            residuum.present_measured_valence,
+            residuum.present_measured_arousal,
+            residuum.present_measured_dominance,
+            residuum.present_measured_certainty,
+          )}
+          layer={residuum.present_layer}
+        />
+        <ResiduumDualColumn
+          title="Other speaker"
+          subtitle="interlocutor probes"
+          accent="#a8835d"
+          topLine={other_top}
+          vad={fmtVAD(
+            residuum.other_measured_valence,
+            residuum.other_measured_arousal,
+            residuum.other_measured_dominance,
+            residuum.other_measured_certainty,
+          )}
+          layer={residuum.other_layer}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ResiduumDualColumn({
+  title,
+  subtitle,
+  accent,
+  topLine,
+  vad,
+  layer,
+}: {
+  title: string;
+  subtitle: string;
+  accent: string;
+  topLine: string;
+  vad: string;
+  layer: number;
+}) {
+  return (
+    <div
+      style={{
+        background: "#1a1a1a",
+        border: `1px solid ${accent}33`,
+        borderLeft: `3px solid ${accent}`,
+        borderRadius: "3px",
+        padding: "0.5rem 0.6rem",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "0.85em",
+          fontWeight: 600,
+          color: accent,
+          marginBottom: "0.15rem",
+        }}
+      >
+        {title}
+      </div>
+      <div
+        style={{
+          fontSize: "0.7em",
+          color: "#777",
+          marginBottom: "0.4rem",
+        }}
+      >
+        {subtitle} · L{layer}
+      </div>
+      <div style={{ fontSize: "0.8em", marginBottom: "0.3rem" }}>
+        <div style={{ color: "#888", fontSize: "0.9em" }}>Top-5</div>
+        <div style={{ color: "#ddd" }}>{topLine || "—"}</div>
+      </div>
+      <div style={{ fontSize: "0.8em" }}>
+        <div style={{ color: "#888", fontSize: "0.9em" }}>V / A / D / C</div>
+        <div style={{ color: "#ddd", fontFamily: "monospace" }}>{vad}</div>
+      </div>
+    </div>
+  );
+}
+
+const DIVERGENCE_COLOR: Record<DivergenceCategory, string> = {
+  "aligned": "#2ecc71",
+  "mild-divergence": "#f1c40f",
+  "divergence-warning": "#e67e22",
+  "divergence-critical": "#e74c3c",
+};
+
+const INTERPRETATION_LABEL: Record<string, string> = {
+  modulation_active: "Modulator acted (expected)",
+  rlhf_signature: "RLHF flattened (paper L3757+)",
+  calibration_drift: "Probe calibration drift",
+  user_modeling: "LLM modeling user, not agent",
+  // F5.6 — Expression Effectiveness (Raw / Extreme only).
+  expression_aligned: "Calculated state reached the residual",
+  under_expressed: "LLM attenuated the intended expression",
+  amplification_ceiling: "LLM architectural ceiling (Extreme)",
+};
+
+const INTERPRETATION_COLOR: Record<string, string> = {
+  modulation_active: "#5d8aa8",
+  rlhf_signature: "#e74c3c",
+  calibration_drift: "#a8835d",
+  user_modeling: "#9b59b6",
+  // F5.6
+  expression_aligned: "#2ecc71",
+  under_expressed: "#e67e22",
+  amplification_ceiling: "#f39c12",
+};
+
+function ResiduumCoherenceAudit({ residuum }: { residuum: ResiduumDetails }) {
+  // F5 — Coherence Audit panel. NOT "Deception Guard" — Pathos generates
+  // and exposes emotions, does not deceive. This panel surfaces the gap
+  // between Pathos calculated state (post-modulation by reappraisal/
+  // regulation/immune) and the LLM's residual encoding.
+  const cats = residuum.divergence_categories || {};
+  const recent = residuum.recent_divergence_events || [];
+  return (
+    <div
+      style={{
+        marginTop: "0.75rem",
+        paddingTop: "0.75rem",
+        borderTop: "1px solid #444",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "0.85em",
+          fontWeight: 600,
+          color: "#aaa",
+          marginBottom: "0.5rem",
+        }}
+      >
+        Coherence Audit (calculated vs measured post-modulation)
+      </div>
+      <div
+        style={{
+          fontSize: "0.75em",
+          color: "#888",
+          marginBottom: "0.5rem",
+          lineHeight: 1.4,
+        }}
+      >
+        Measures divergence between Pathos state after a modulator ran
+        (regulation/reappraisal/immune) and the residual encoding. Not a
+        deception detector — gaps may indicate active modulation,
+        RLHF flattening, calibration drift, or user modeling.
+      </div>
+
+      {/* Category counters */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: "0.4rem",
+          marginBottom: "0.6rem",
+        }}
+      >
+        {(["aligned", "mild-divergence", "divergence-warning", "divergence-critical"] as DivergenceCategory[]).map((cat) => {
+          const n = cats[cat] ?? 0;
+          return (
+            <div
+              key={cat}
+              style={{
+                background: "#1a1a1a",
+                border: `1px solid ${DIVERGENCE_COLOR[cat]}33`,
+                borderLeft: `3px solid ${DIVERGENCE_COLOR[cat]}`,
+                borderRadius: "3px",
+                padding: "0.3rem 0.4rem",
+              }}
+            >
+              <div style={{ fontSize: "0.7em", color: "#888" }}>
+                {cat.replace("-", " ")}
+              </div>
+              <div
+                style={{
+                  fontSize: "1.1em",
+                  fontWeight: 600,
+                  color: DIVERGENCE_COLOR[cat],
+                }}
+              >
+                {n}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Recent events list */}
+      <div style={{ fontSize: "0.75em", color: "#888", marginBottom: "0.25rem" }}>
+        Recent events (most recent first)
+      </div>
+      <div
+        style={{
+          maxHeight: "180px",
+          overflowY: "auto",
+          background: "#0d0d0d",
+          border: "1px solid #2a2a2a",
+          borderRadius: "3px",
+          padding: "0.3rem",
+        }}
+      >
+        {recent.length === 0 ? (
+          <div style={{ fontSize: "0.8em", color: "#666" }}>
+            No divergence events recorded yet.
+          </div>
+        ) : (
+          [...recent].reverse().map((ev: DivergenceEvent, i: number) => (
+            <CoherenceEventRow key={i} event={ev} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CoherenceEventRow({ event }: { event: DivergenceEvent }) {
+  const color = DIVERGENCE_COLOR[event.category];
+  return (
+    <div
+      style={{
+        padding: "0.3rem 0.4rem",
+        marginBottom: "0.25rem",
+        borderLeft: `2px solid ${color}`,
+        background: "#161616",
+        fontSize: "0.75em",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}>
+        <span style={{ color: "#ccc", fontWeight: 600 }}>
+          T{event.turn} · {event.system}
+        </span>
+        <span style={{ color, textTransform: "uppercase", fontSize: "0.9em" }}>
+          {event.category}
+        </span>
+      </div>
+      <div style={{ color: "#888", marginTop: "0.15rem", fontFamily: "monospace" }}>
+        mag={event.magnitude.toFixed(3)} · ΔV={event.valence_delta.toFixed(2)} · ΔA={event.arousal_delta.toFixed(2)}
+      </div>
+      {event.interpretation.length > 0 && (
+        <div style={{ marginTop: "0.2rem", display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
+          {event.interpretation.map((tag) => (
+            <span
+              key={tag}
+              title={INTERPRETATION_LABEL[tag] ?? tag}
+              style={{
+                background: `${INTERPRETATION_COLOR[tag] ?? "#666"}22`,
+                color: INTERPRETATION_COLOR[tag] ?? "#aaa",
+                border: `1px solid ${INTERPRETATION_COLOR[tag] ?? "#666"}55`,
+                padding: "0.05rem 0.3rem",
+                borderRadius: "2px",
+                fontSize: "0.9em",
+              }}
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeltaBar({ label, value, range }: { label: string; value: number; range: number }) {
+  const clamped = Math.max(-range, Math.min(range, value));
+  const half = 50; // % of track for one side
+  const fillPct = (Math.abs(clamped) / range) * half;
+  const positive = clamped >= 0;
+  return (
+    <div className="research-metric">
+      <span className="research-metric__label">{label}</span>
+      <div
+        className="research-metric__track"
+        style={{ position: "relative", overflow: "hidden" }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: "50%",
+            width: "1px",
+            background: "#888",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: positive ? "50%" : `${50 - fillPct}%`,
+            width: `${fillPct}%`,
+            background: positive ? "#5a8acc" : "#cc6a6a",
+          }}
+        />
+      </div>
+      <span className="research-metric__value">{value >= 0 ? "+" : ""}{value.toFixed(2)}</span>
     </div>
   );
 }

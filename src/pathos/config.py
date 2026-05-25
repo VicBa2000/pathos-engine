@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     transformers_model: str = "qwen3:4b"  # Ollama name, HF ID, or local path
     transformers_device_map: str = "auto"  # "auto", "cpu", or "cuda"
     transformers_adapter_path: str = ""  # Path to QLoRA adapter (5.2b/5.3b). Empty = no adapter.
+    # 4-bit (NF4) quantized load via bitsandbytes. Lets a ~8GB fp16 model fit a
+    # 6GB GPU (~3GB) so residual capture / steering run on GPU instead of CPU.
+    # Requires CUDA + bitsandbytes; degrades gracefully to fp16/CPU otherwise.
+    transformers_load_in_4bit: bool = False
+
+    # RESIDUUM Pillar 8 — residual stream introspection (F2)
+    # target_layer for the F2.1 hook. Must match the layer used to extract
+    # the probe library (see steering_extract.py --layer). 24 is the default
+    # for qwen3:4b (~2/3 of 36 layers per the paper's recommendation).
+    residuum_target_layer: int = Field(default=24, ge=0, le=128)
 
     # Server
     host: str = "127.0.0.1"

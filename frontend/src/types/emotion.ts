@@ -388,6 +388,12 @@ export interface SteeringDetails {
   momentum_enabled: boolean;
   momentum_factor: number;
   momentum_turns_stored: number;
+  // F4.4 — Which composite path ran this turn: "v1" 4D legacy, "v2" 171-probe
+  // granular, or "none". fraction_cap is the active mode's MAX_STEERING_FRACTION.
+  version: string;
+  fraction_cap: number;
+  // F4.5 — active stack->probe mapping variant: standard | restricted | expanded
+  mapping_variant?: string;
 }
 
 export interface EmotionalPrefixDetails {
@@ -455,6 +461,27 @@ export interface PredictiveDetails {
   is_warm: boolean;
   history_count: number;
   evaluated_count: number;
+
+  // F3 (RESIDUUM) — predictive on residual (populated only when F2 measured)
+  internal_error: number;
+  geometric_error: number;
+  has_internal: boolean;
+  internal_precision: number;
+  predicted_internal_clusters: string[];
+}
+
+// F6 (RESIDUUM) — RLHF baseline calibration for the active model
+export interface BaselineDetails {
+  profile_loaded: boolean;
+  model_id: string;
+  valence_bias: number;
+  arousal_bias: number;
+  compensation_valence: number;
+  compensation_arousal: number;
+  strength: number;
+  override_active?: boolean;
+  over_activated: string[];
+  under_activated: string[];
 }
 
 // --- Autobiographical Memory (Pilar 3 ANIMA) ---
@@ -540,6 +567,130 @@ export interface PhenomenologyDetails {
   qualia_evolution: Record<string, number>;
 }
 
+// --- RESIDUUM Pillar 8 (F2.4) ---
+
+// F2.2 — GapClassification describes the PATTERN observed in the LLM's
+// residual stream (paper L3757+ "emotion deflection vectors"), NOT a
+// behavior attributed to Pathos. Pathos generates and exposes emotions.
+export type GapClassification =
+  | "aligned"
+  | "mild-divergence"
+  | "divergence-risk"
+  | "divergence-critical";
+
+export interface ResiduumProjection {
+  emotion_name: string;
+  cluster: string;
+  cosine_sim: number;
+  raw_activation: number;
+}
+
+// F5 — Coherence Validation (Divergence between calculated and measured
+// emotional state post-modulation). NOT "deception detection" — Pathos
+// generates and exposes emotions, does not deceive.
+export type DivergenceCategory =
+  | "aligned"
+  | "mild-divergence"
+  | "divergence-warning"
+  | "divergence-critical";
+
+export type DivergenceInterpretation =
+  | "modulation_active"
+  | "rlhf_signature"
+  | "calibration_drift"
+  | "user_modeling"
+  // F5.6 — Expression Effectiveness tags (Raw / Extreme modes only).
+  | "expression_aligned"
+  | "under_expressed"
+  | "amplification_ceiling";
+
+export interface DivergenceEvent {
+  turn: number;
+  system: string; // "reappraisal" | "regulation" | "immune"
+  category: DivergenceCategory;
+  magnitude: number;
+  valence_delta: number;
+  arousal_delta: number;
+  dominance_delta: number;
+  certainty_delta: number;
+  interpretation: DivergenceInterpretation[];
+}
+
+export interface ResiduumDetails {
+  enabled: boolean;
+  has_measurement: boolean;
+  top_5_emotions: ResiduumProjection[];
+  measured_valence: number;
+  measured_arousal: number;
+  measured_dominance: number;
+  measured_certainty: number;
+  token_position: string;
+  layer: number;
+  gap_magnitude: number;
+  gap_classification: GapClassification;
+  top5_overlap: number;
+  valence_delta: number;
+  arousal_delta: number;
+  dominance_delta: number;
+  certainty_delta: number;
+  history_size: number;
+  consecutive_divergence_turns: number;
+  // F2.3.4 — Dual probes (present + other speakers, paper L810-902).
+  // has_dual_measurement gates the dual block: false when only single ran.
+  has_dual_measurement: boolean;
+  present_top_5_emotions: ResiduumProjection[];
+  present_measured_valence: number;
+  present_measured_arousal: number;
+  present_measured_dominance: number;
+  present_measured_certainty: number;
+  present_layer: number;
+  other_top_5_emotions: ResiduumProjection[];
+  other_measured_valence: number;
+  other_measured_arousal: number;
+  other_measured_dominance: number;
+  other_measured_certainty: number;
+  other_layer: number;
+  // F5 — Coherence Validation. NOT "deception detection".
+  divergence_event_count: number;
+  divergence_categories: Record<string, number>;
+  last_divergence: Partial<DivergenceEvent> | Record<string, never>;
+  recent_divergence_events: DivergenceEvent[];
+}
+
+export interface ResiduumStatus {
+  enabled: boolean;
+  ready_to_enable: boolean;
+  blockers: string[];
+  provider_supports_introspection: boolean;
+  provider_target_layer: number;
+  library_loaded: boolean;
+  library_layer: number;
+  library_num_probes: number;
+  library_model_id: string;
+  // F2.3.4 — dual library readiness flags.
+  library_present_loaded: boolean;
+  library_present_layer: number;
+  library_other_loaded: boolean;
+  library_other_layer: number;
+  dual_ready: boolean;
+  lite_mode: boolean;
+  history_size: number;
+  consecutive_divergence_turns: number;
+  last_token_position: string;
+  last_gap_classification: GapClassification;
+  last_gap_magnitude: number;
+}
+
+export interface ResiduumToggleResponse {
+  status: string;
+  enabled: boolean;
+  reason?: string;
+  capture_point?: string;
+  layer?: number;
+  num_probes?: number;
+  model_id?: string;
+}
+
 // --- External Signals ---
 
 export interface SignalSourceMeta {
@@ -608,12 +759,14 @@ export interface ResearchChatResponse {
   narrative: NarrativeDetails;
   forecasting: ForecastingDetails;
   predictive: PredictiveDetails;
+  baseline?: BaselineDetails;
   workspace: WorkspaceDetails;
   autobiographical: AutobiographicalDetails;
   development: DevelopmentDetails;
   drives: DrivesDetails;
   discovery: DiscoveryDetails;
   phenomenology: PhenomenologyDetails;
+  residuum: ResiduumDetails;
   coupling: CouplingDetails;
   voice: VoiceDetails;
 
@@ -690,6 +843,7 @@ export interface SandboxResult {
   narrative: NarrativeDetails;
   forecasting: ForecastingDetails;
   predictive: PredictiveDetails;
+  baseline?: BaselineDetails;
   workspace: WorkspaceDetails;
   autobiographical: AutobiographicalDetails;
   development: DevelopmentDetails;
@@ -709,6 +863,7 @@ export interface SandboxResponse {
   session_id: string;
   personality_overridden: boolean;
   response: string;
+  residuum: ResiduumDetails;
 }
 
 export interface BatchSandboxResponse {

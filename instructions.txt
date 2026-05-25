@@ -1,5 +1,5 @@
 ===============================================================================
-              PATHOS ENGINE v5 (ANIMA) - USAGE INSTRUCTIONS
+         PATHOS ENGINE v6 (ANIMA + RESIDUUM) - USAGE INSTRUCTIONS
 ===============================================================================
 
 ===============================================================================
@@ -608,6 +608,59 @@
 
   Max 3 display panels active simultaneously (Avatar, Qualia Orb, Genesis,
   Network, Pipeline, Emotion Panel). Disable one to enable another.
+
+===============================================================================
+4B. RESIDUUM (v6) — USING RESIDUAL-STREAM INTROSPECTION
+===============================================================================
+
+  WHAT IT IS
+  ----------
+  RESIDUUM (Pillar 8) lets Pathos READ the LLM's residual stream and MEASURE
+  the emotions the model actually encodes — 171 linear emotion directions —
+  instead of only injecting the ones it computes. Based on Anthropic's 2026
+  paper "Emotion Concepts and their Function in a Large Language Model"
+  (Lindsey, Sofroniew et al.).
+
+  REQUIREMENTS (for the measurement features F2/F3/F5)
+  ----------------------------------------------------
+  - The LOCAL TRANSFORMERS path (not Ollama/Claude): they read real hidden
+    states. In the Model Manager, switch the model to the Transformers/Steering
+    provider.
+  - A probe library for the model (qwen3:4b ships extracted; for another model
+    run: python -m pathos.engine.steering_extract --extract-171 --model <id>).
+  - Advanced mode (not Lite). On a 6GB GPU, enable 4-bit load
+    (PATHOS_TRANSFORMERS_LOAD_IN_4BIT=true) so the model fits.
+
+  ENABLING / DISABLING
+  --------------------
+  - With the Transformers path + probe library + Advanced/Raw/Extreme,
+    introspection AUTO-ENABLES (default ON). You don't need to do anything.
+  - To opt out, click "Disable" on the Residuum Introspection section header in
+    the Research Panel (Research mode). Your choice sticks for the session.
+  - On Ollama/Claude or in Lite mode it stays OFF silently; granular steering
+    (F4) still applies as prompt injection with the 171-emotion vocabulary, and
+    baseline calibration (F6) still applies.
+
+  WHAT TO LOOK AT (Research mode -> Research Panel)
+  -------------------------------------------------
+  - Residuum Introspection: the top-5 emotions the model is ACTUALLY encoding
+    (measured) vs the ones Pathos calculated, plus the authenticity gap.
+  - Coherence Audit: divergence events — did the model squash an emotion Pathos
+    generated? (the paper's "deflection" pattern).
+  - Composite (under Steering Vectors): which steering ran (V1/V2), the active
+    cap, and the mapping variant (standard / expanded for Raw/Extreme).
+  - Baseline Calibration: the model's measured RLHF bias and the compensation
+    applied, with a SLIDER to override the strength (Reset returns to the
+    per-mode default).
+  - A disclaimer is always shown: the measured state is a FUNCTIONAL readout,
+    not evidence of subjective experience.
+
+  ETHICS
+  ------
+  When introspection is on, any suppressive system measures the residual before
+  and after and reports the delta — suppression without measurement is
+  prohibited. Steering caps are inviolable (0.15 absolute ceiling). The system
+  never claims to feel; it reports what it measures.
 
 ===============================================================================
 5. VOICE

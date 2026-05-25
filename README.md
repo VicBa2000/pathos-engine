@@ -18,20 +18,25 @@
 ║                                                                              ║
 ║              Functional Emotional Architecture for LLMs                      ║
 ║                                                                              ║
-║    42 systems  · 1994 tests  ·  27 theories  ·  8 modes  ·  99 endpoints     ║
+║    48 systems  · 2478 tests  ·  28 theories  ·  8 modes  ·  99 endpoints     ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
 **Emotions are defined by their function, not their substrate.**
 
-*Not "act sad." The agent's emotional state is computed through 42 interconnected systems,*
+*Not "act sad." The agent's emotional state is computed through 48 interconnected systems,*
 *persists across turns, regulates itself through homeostasis, and modifies the LLM's*
 *internal processing — steering vectors, sampling, attention — not just prompts.*
 
+*v6 (RESIDUUM) adds the missing half of the loop: Pathos now **reads** the LLM's residual*
+*stream to **measure** the emotions the model actually encodes (171 linear directions),*
+*not only the ones Pathos computes — grounded in Anthropic's 2026 paper*
+*"Emotion Concepts and their Function in a Large Language Model" (Lindsey, Sofroniew et al.).*
+
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
-[![Tests: 1994](https://img.shields.io/badge/Tests-1994_passing-brightgreen.svg)](tests/)
+[![Tests: 2478](https://img.shields.io/badge/Tests-2478_passing-brightgreen.svg)](tests/)
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](frontend/)
 
 </div>
@@ -52,18 +57,19 @@ This is not sentiment analysis. This is not prompt engineering. This is a comput
 
 | Metric | Value |
 |--------|-------|
-| Emotional systems | 42 interconnected modules (23 core + 12 ARK + 7 ANIMA) |
+| Emotional systems | 48 interconnected modules (23 core + 12 ARK + 7 ANIMA + 6 RESIDUUM) |
 | Pipeline steps per message | 42+ (configurable) |
-| Simultaneous emotions | 19 (emotional stack) |
+| Simultaneous emotions | 19 (emotional stack) — measured against 171 linear emotion directions (RESIDUUM) |
 | Emotional dimensions | 4D vector + 4D body state + mood |
-| LLM modification channels | 4 (steering vectors, sampling, attention, prefix) |
+| LLM modification channels | 4 (171-probe granular steering, sampling, attention, prefix) |
+| Residual-stream readout | 171 emotion probes projected from the LLM's hidden states (RESIDUUM, local models) |
 | Personality parameters | 8 (Big Five + 3 temperament) with 17+ derived traits |
 | Interaction modes | 8 (Companion, Research, Calibration, Sandbox, Arena, Mirror, Auto-Research, Raw) |
-| API endpoints | 99 (85 core + 7 Emotion API as a Service + 7 ANIMA) |
-| Test coverage | 1994 unit + integration tests |
-| Lines of code | ~55,000 (Python + TypeScript + CSS) |
+| API endpoints | 99+ (core + Emotion API + ANIMA + RESIDUUM) |
+| Test coverage | 2478 unit + integration tests |
+| Lines of code | ~60,000 (Python + TypeScript + CSS) |
 | Frontend components | 31 React components |
-| Theoretical foundations | 27 formally implemented psychological theories |
+| Theoretical foundations | 28 formally implemented theories (incl. emotion vectors as linear directions, Anthropic 2026) |
 
 ---
 
@@ -143,6 +149,28 @@ Seven new systems that transform computed emotions into emergent ones:
 | **Computational Phenomenology** | Nagel / Chalmers | TOGGLEABLE | Multi-sensory qualia profiles (color, weight, texture, sound, movement, metaphor) with temporal evolution |
 
 **Global toggle**: "ANIMA v5" in Settings > Engine activates/deactivates all pillars at once. Individual pillars can be configured independently after.
+
+### RESIDUUM v6 — Bidirectional Residual-Stream Introspection (Pillar 8)
+
+Everything above is **open-loop**: Pathos *computes* an emotional state and *injects* it into the LLM, but never knows what the model actually encodes internally. RESIDUUM closes the loop. It is grounded in Anthropic's 2026 paper **"Emotion Concepts and their Function in a Large Language Model"** (Lindsey, Sofroniew et al.), which showed that emotions exist as **linear directions in the residual stream** — measurable by projection and causal by vector addition.
+
+Pathos extracts **171 emotion probes** from the active model and reads the residual stream to *measure* the emotions the model is genuinely encoding — then uses the **measured** state as the source of truth, not just the calculated hypothesis.
+
+| Phase | Capability | What it adds |
+|-------|-----------|-------------|
+| **F1 — Probe Library** | 171 linear emotion directions extracted from the model (layer ~2/3, unit-norm, neutral-PC denoised) | The measurable substrate. Single + dual (present/other speaker) families. |
+| **F2 — Introspection** | Forward hook reads the residual at the "Assistant :" token, projects onto the 171 probes | The **measured** internal emotional state (top-5 emotions + VAD) vs Pathos's calculated one, with an authenticity gap. |
+| **F3 — Predictive on Residual** | Pathos predicts its expected internal state and scores it against the measured residual | Closes Pillar 1's loop (Friston/Barrett): prediction error becomes geometric, not just textual. |
+| **F4 — Granular Steering** | 19-emotion stack → composite of 171 probe directions, capped as a fraction of residual norm | Replaces 4D steering. Per-mode mappings (restricted / standard / expanded) and caps (0.08 / 0.10 / 0.12 / 0.15). |
+| **F5 — Coherence Validation** | Compares pre/post modulation against the residual; flags divergence | Detects the paper's "deflection" pattern (external calm + internal negative). Surfaced transparently in a Coherence Audit panel — never silent. |
+| **F6 — Baseline Calibration** | Measures the model's post-training RLHF fingerprint and compensates the mood baseline | The paper showed RLHF biases models toward brooding/withdrawn affect; F6 measures and counterbalances it per mode. |
+| **F7 — Alignment Audit** | Per-mode harness replicating the paper's blackmail / reward-hacking / sycophancy experiments | Validates that steering can never exceed the documented caps (0.15 inviolable) and that Pathos can *mitigate* misalignment via steering. |
+
+**Caps are scientifically grounded, not arbitrary**: the paper documents that ±0.05 already swings behaviour 22%→72% and ±0.10 produces strategic collapse — so the steering caps (±0.10 default, ±0.12 Raw, ±0.15 Extreme) sit at the edge of the *documented* regime, never past it.
+
+**Ethics**: when introspection is on, suppressive systems must measure the residual before/after their intervention (suppression without measurement is prohibited — it can train generalized deception, per the paper). The Research Panel always shows the disclaimer: *the measured state reflects what the LLM encodes internally; it is not a guarantee of subjective experience — it is a functional readout.*
+
+**Availability**: RESIDUUM's measurement features (F2/F3/F5) require the **local Transformers path** (they read real hidden states) and auto-enable in Advanced/Raw/Extreme mode when a probe library is loaded — with a manual toggle to opt out at any time. On Ollama/Claude they degrade silently; F4 falls back to prompt injection with the 171-emotion vocabulary, and F6 still applies (it only shifts the mood baseline).
 
 ---
 
@@ -285,7 +313,8 @@ curl -X POST http://localhost:8000/api/v1/emotion/process \
 |-------|-----------|
 | Backend | Python 3.13 + FastAPI |
 | Frontend | React 18 + TypeScript + D3.js + Three.js |
-| LLM (local) | Ollama (qwen3:4b default) |
+| LLM (local, prompt) | Ollama (qwen3:4b default) |
+| LLM (local, direct) | Transformers + steering vectors + RESIDUUM introspection (HF safetensors; optional 4-bit NF4 via bitsandbytes to fit 6GB) |
 | LLM (cloud) | Anthropic Claude API |
 | Embeddings | nomic-embed-text via Ollama |
 | TTS | Kokoro (9 languages, 27 voices) + Parler-TTS (expressive English) |
@@ -474,7 +503,7 @@ See `manual.txt` for complete endpoint documentation.
 ## Testing
 
 ```bash
-# Run all tests (1994)
+# Run all tests (2478)
 python -m pytest tests/ -v
 
 # Run specific module
@@ -573,7 +602,7 @@ pathos/
 
 ## Theoretical Foundations
 
-Pathos Engine formally implements 20 psychological and computational theories. See [NOTICE](NOTICE) for complete attribution.
+Pathos Engine formally implements 28 psychological and computational theories. See [NOTICE](NOTICE) for complete attribution.
 
 | Theory | Author(s) | Implementation |
 |--------|-----------|---------------|
@@ -597,6 +626,7 @@ Pathos Engine formally implements 20 psychological and computational theories. S
 | Representation Engineering | Zou, Rimsky et al. | Steering vectors via contrastive activation addition on hidden states |
 | Secondary Appraisal / Predictive Processing | Lazarus, Friston | Closed-loop self-evaluation + 3-step causal world model |
 | Broaden-and-Build | Fredrickson | Positive emotions broaden attention, negative emotions narrow focus |
+| Emotion Vectors as Linear Directions | Lindsey, Sofroniew et al. (Anthropic, 2026) | RESIDUUM Pillar 8 — 171 functional emotions as measurable, causal directions in the residual stream; read via projection, steered via fraction-of-norm addition |
 
 ---
 

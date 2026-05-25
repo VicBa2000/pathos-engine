@@ -31,6 +31,7 @@ from pathos.models.development import DevelopmentState, default_development_stat
 from pathos.models.drives import DrivesState, default_drives_state
 from pathos.models.discovery import DiscoveryState, default_discovery_state
 from pathos.models.phenomenology import PhenomenologyState, default_phenomenology_state
+from pathos.models.residuum import ResiduumState, default_residuum_state
 from pathos.models.external_signals import ExternalSignalsConfig, default_signals_config
 from pathos.models.voice import VoiceConfig, default_voice_config
 from pathos.models.immune import ImmuneState, default_immune_state
@@ -83,6 +84,7 @@ class SessionState:
         self.drives: DrivesState = default_drives_state()  # Pilar 5 ANIMA: Autonomia Motivacional
         self.discovery: DiscoveryState = default_discovery_state()  # Pilar 6 ANIMA: Descubrimiento Emocional
         self.phenomenology: PhenomenologyState = default_phenomenology_state()  # Pilar 7 ANIMA: Fenomenologia Computacional
+        self.residuum: ResiduumState = default_residuum_state()  # Pilar 8 RESIDUUM: Introspeccion del residual stream
         self.voice_config: VoiceConfig = default_voice_config()
         self.signals_config: ExternalSignalsConfig = default_signals_config()
         self.last_audio: bytes | None = None  # Last TTS audio (WAV bytes)
@@ -95,6 +97,20 @@ class SessionState:
         self.world_model_enabled: bool = True  # World model: predict emotional impact before sending
         self.interoceptive_state: InteroceptiveState = InteroceptiveState()  # Body-state duration tracking
         self.direct_mode: bool = True  # Direct LLM modification (steering/prefix/attention) vs prompt injection only
+        # F6 — RLHF baseline compensation currently applied to the mood baseline.
+        # Tracked so re-application (e.g. on mode change) is idempotent and the
+        # nudge coexists with the dynamic dream/extreme baseline shifts.
+        self.baseline_comp_v: float = 0.0
+        self.baseline_comp_a: float = 0.0
+        # F2 — auto-enable policy. True (default) = follow the auto policy:
+        # introspection turns ON when Advanced + Transformers + probe library
+        # are all present, OFF otherwise. The manual /residuum/toggle sets this
+        # False so the user's explicit choice sticks (opt-out always available).
+        self.residuum_auto: bool = True
+        # F6 — optional user override of the baseline-compensation strength
+        # (ethics §4: "usuario puede overridear con slider en UI"). None =
+        # follow the per-mode default (0.3/0.7/1.0); else clamp to [0,1].
+        self.baseline_strength_override: float | None = None
         self.steering_enabled: bool = True  # Steering vectors: modify LLM hidden states (local models only)
         self.steering_momentum_enabled: bool = True  # Steering momentum: temporal inertia across turns
         self.steering_momentum: SteeringMomentum = SteeringMomentum()  # Momentum state per session
@@ -143,6 +159,37 @@ class SessionState:
         self.dynamics = self._create_dynamics()
         self.regulator.regulation_capacity = personality.regulation_capacity_base
 
+    def apply_baseline_compensation(self, profile: Any, strength: float) -> tuple[float, float]:
+        """F6 — Compensate the mood baseline against the model's RLHF fingerprint.
+
+        Idempotent and re-tunable: removes the previously-applied compensation
+        delta and applies the new one to BOTH baseline_valence and
+        original_baseline_valence (the anchor). This lets the nudge coexist
+        additively with the dynamic dream/extreme baseline shifts (which move
+        baseline_valence) without compounding across turns or mode changes.
+
+        profile: BaselineProfile | None. None or strength<=0 -> compensation 0
+        (removes any prior nudge), i.e. graceful no-op when no profile exists.
+        Returns the (valence, arousal) compensation now in effect.
+        """
+        from pathos.engine.baseline_calibration import compute_baseline_compensation
+
+        comp_v, comp_a = compute_baseline_compensation(profile, strength)
+        mood = self.emotional_state.mood
+        # Remove old delta, apply new (idempotent from whatever the dynamic
+        # systems left in place).
+        mood.baseline_valence = round(
+            max(-1.0, min(1.0, mood.baseline_valence - self.baseline_comp_v + comp_v)), 4)
+        mood.original_baseline_valence = round(
+            max(-1.0, min(1.0, mood.original_baseline_valence - self.baseline_comp_v + comp_v)), 4)
+        mood.baseline_arousal = round(
+            max(0.0, min(1.0, mood.baseline_arousal - self.baseline_comp_a + comp_a)), 4)
+        mood.original_baseline_arousal = round(
+            max(0.0, min(1.0, mood.original_baseline_arousal - self.baseline_comp_a + comp_a)), 4)
+        self.baseline_comp_v = comp_v
+        self.baseline_comp_a = comp_a
+        return comp_v, comp_a
+
     def to_dict(self, model_name: str = "") -> dict[str, Any]:
         """Serializa todo el estado a un dict para JSON save."""
         return {
@@ -174,6 +221,7 @@ class SessionState:
             "drives": self.drives.model_dump(),
             "discovery": self.discovery.model_dump(),
             "phenomenology": self.phenomenology.model_dump(),
+            "residuum": self.residuum.model_dump(),
             "somatic_markers": self.somatic_markers.model_dump(),
             # Non-Pydantic systems
             "memory": [m.model_dump() for m in self.memory.memories],
@@ -198,6 +246,13 @@ class SessionState:
             "lite_mode": self.lite_mode,
             "advanced_mode": self.advanced_mode,
             "cloud_providers": encrypt_cloud_providers(self.cloud_providers),
+            # F6 — currently-applied baseline compensation (for idempotent re-apply)
+            "baseline_comp_v": self.baseline_comp_v,
+            "baseline_comp_a": self.baseline_comp_a,
+            # F2 — auto-enable policy (False once the user toggled manually)
+            "residuum_auto": self.residuum_auto,
+            # F6 — optional baseline-strength override (None = per-mode default)
+            "baseline_strength_override": self.baseline_strength_override,
         }
 
     @classmethod
@@ -253,6 +308,8 @@ class SessionState:
             session.discovery = DiscoveryState(**data["discovery"])
         if "phenomenology" in data:
             session.phenomenology = PhenomenologyState(**data["phenomenology"])
+        if "residuum" in data:
+            session.residuum = ResiduumState(**data["residuum"])
 
         # Non-Pydantic: memory
         if "memory" in data:
@@ -297,6 +354,11 @@ class SessionState:
         session.lite_mode = data.get("lite_mode", False)
         session.advanced_mode = data.get("advanced_mode", True)
         session.cloud_providers = decrypt_cloud_providers(data.get("cloud_providers", {}))
+        session.baseline_comp_v = float(data.get("baseline_comp_v", 0.0))
+        session.baseline_comp_a = float(data.get("baseline_comp_a", 0.0))
+        session.residuum_auto = bool(data.get("residuum_auto", True))
+        _bso = data.get("baseline_strength_override", None)
+        session.baseline_strength_override = float(_bso) if _bso is not None else None
 
         return session
 

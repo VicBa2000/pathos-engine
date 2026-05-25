@@ -11,6 +11,8 @@ import type {
   ChallengeChatResponse,
   ChatResponse,
   ResearchChatResponse,
+  ResiduumStatus,
+  ResiduumToggleResponse,
   SandboxResponse,
   BatchSandboxResponse,
   StateResponse,
@@ -527,6 +529,36 @@ export function toggleAnima(
   return request(`/anima/${sessionId}`, {
     method: "POST",
     body: JSON.stringify({ enabled }),
+  });
+}
+
+// --- RESIDUUM Pillar 8 (F2.4) ---
+
+export function toggleResiduum(
+  sessionId: string,
+  enabled: boolean,
+  capturePoint?: string,
+): Promise<ResiduumToggleResponse> {
+  const body: Record<string, unknown> = { enabled };
+  if (capturePoint) body.capture_point = capturePoint;
+  return request(`/residuum/toggle/${sessionId}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getResiduumStatus(sessionId: string): Promise<ResiduumStatus> {
+  return request(`/residuum/status/${sessionId}`);
+}
+
+// F6 — set/clear the baseline-compensation strength override (null = per-mode default).
+export function setBaselineStrength(
+  sessionId: string,
+  value: number | null,
+): Promise<{ status: string; override: number | null; effective_strength: number }> {
+  return request(`/residuum/baseline-strength/${sessionId}`, {
+    method: "POST",
+    body: JSON.stringify({ value }),
   });
 }
 

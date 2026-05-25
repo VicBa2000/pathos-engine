@@ -142,6 +142,7 @@ class TransformersProvider(LLMProvider):
         embed_model: str = "nomic-embed-text",
         torch_dtype: str = "auto",
         adapter_path: str | None = None,
+        load_in_4bit: bool = False,
     ) -> None:
         self._model_id = model_id
         self._device_map = device_map
@@ -149,6 +150,11 @@ class TransformersProvider(LLMProvider):
         self._embed_model = embed_model
         self._torch_dtype = torch_dtype
         self._adapter_path = adapter_path  # Path to QLoRA adapter (5.2b/5.3b)
+        # 4-bit (NF4) quantized load via bitsandbytes. Lets a ~8GB fp16 model
+        # (e.g. Qwen3-4B) fit a 6GB GPU (~3GB in 4-bit) so residual capture /
+        # steering can run on GPU instead of CPU. Requires CUDA + bitsandbytes;
+        # degrades gracefully to the fp16/CPU path when unavailable.
+        self._load_in_4bit = load_in_4bit
 
         self._model: Any = None
         self._tokenizer: Any = None
@@ -207,7 +213,41 @@ class TransformersProvider(LLMProvider):
         # rotary embedding mismatches in transformers 4.46.x. Try GPU first,
         # fall back to CPU if OOM.
         target_device = "cpu"
-        if torch.cuda.is_available():
+        loaded_4bit = False
+
+        # 4-bit (NF4) GPU load: lets a ~8GB fp16 model fit a 6GB card (~3GB).
+        # Opt-in (self._load_in_4bit) and best-effort: any failure (missing
+        # bitsandbytes, OOM, unsupported) degrades to the fp16/CPU path below.
+        if self._load_in_4bit and torch.cuda.is_available():
+            try:
+                from transformers import BitsAndBytesConfig
+                import bitsandbytes  # noqa: F401 — ensure the runtime is present
+                quant_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                )
+                logger.info("Loading model '%s' in 4-bit NF4 on GPU...", self._model_id)
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    quantization_config=quant_config,
+                    # Single-device placement ({"":0}) avoids the rotary-embedding
+                    # mismatch that device_map="auto" triggers in transformers 4.46.x.
+                    device_map={"": 0},
+                    trust_remote_code=True,
+                )
+                target_device = "cuda"
+                loaded_4bit = True
+            except Exception as e:  # missing bitsandbytes / OOM / unsupported
+                logger.warning(
+                    "4-bit load failed for '%s' (%s); falling back to fp16/CPU.",
+                    self._model_id, e,
+                )
+                self._model = None
+                torch.cuda.empty_cache()
+
+        if not loaded_4bit and torch.cuda.is_available():
             try:
                 logger.info("Loading model '%s' on GPU (dtype=%s)...", self._model_id, dtype)
                 self._model = AutoModelForCausalLM.from_pretrained(
@@ -221,7 +261,7 @@ class TransformersProvider(LLMProvider):
                 self._model = AutoModelForCausalLM.from_pretrained(
                     model_path, torch_dtype=torch.float32, trust_remote_code=True,
                 )
-        else:
+        elif not loaded_4bit:
             logger.info("Loading model '%s' on CPU (dtype=%s)...", self._model_id, dtype)
             self._model = AutoModelForCausalLM.from_pretrained(
                 model_path, torch_dtype=torch.float32, trust_remote_code=True,

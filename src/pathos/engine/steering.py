@@ -45,7 +45,131 @@ DIMENSION_WEIGHTS: dict[str, float] = {
 }
 
 # Max steering magnitude (L2 norm) to prevent catastrophic drift.
+# Legacy v1 cap: absolute L2 norm. Kept as a fallback for the Ollama/Claude
+# path and for NPZ caches that pre-date F4.0 (no residual_norm_typical).
 MAX_STEERING_NORM: float = 10.0
+
+# --- F4.2 — Granular steering caps (fraction of residual L2 norm). ---
+# Paper documents that ±0.05 already produces 22%→72% behavioral swings and
+# ±0.10 produces strategic collapse within the probed range. The caps below
+# stay within or just past that documented regime — Extreme amplifies WITHIN
+# the observed collapse, never past it. See CLAUDE.md "Steering strength caps".
+MAX_STEERING_FRACTION_LITE: float = 0.08      # Lite: conservative
+MAX_STEERING_FRACTION_DEFAULT: float = 0.10   # Advanced: documented 2x effective
+MAX_STEERING_FRACTION_RAW: float = 0.12       # Raw: edge of probed range
+MAX_STEERING_FRACTION_EXTREME: float = 0.15   # Extreme: ABSOLUTE CEILING
+
+# Stack activations below this are ignored when building the v2 composite.
+# Prevents trace activations of unrelated emotions from contaminating the
+# direction. Same threshold used by the v5 sampler.
+STACK_ACTIVATION_THRESHOLD: float = 0.05
+
+# Mapping JSON filenames; resolved relative to _STEERING_DATA_DIR.
+_STACK_MAP_FILES: dict[str, str] = {
+    "standard": "stack_to_probe_map.json",
+    "restricted": "stack_to_probe_map_restricted.json",
+    "expanded": "stack_to_probe_map_expanded.json",
+}
+
+
+def resolve_steering_fraction_cap(
+    *,
+    lite_mode: bool = False,
+    raw_mode: bool = False,
+    extreme_mode: bool = False,
+) -> float:
+    """Resolve MAX_STEERING_FRACTION for the active session mode.
+
+    Lite is strictest (most conservative). When several flags are True
+    (defensive case, should not happen in practice) Lite always wins to
+    keep the system safe; Extreme then Raw take precedence over default.
+    """
+    if lite_mode:
+        return MAX_STEERING_FRACTION_LITE
+    if extreme_mode:
+        return MAX_STEERING_FRACTION_EXTREME
+    if raw_mode:
+        return MAX_STEERING_FRACTION_RAW
+    return MAX_STEERING_FRACTION_DEFAULT
+
+
+def load_stack_to_probe_map(variant: str = "standard") -> dict[str, list[str]]:
+    """Load the STANDARD or RESTRICTED stack-to-probe mapping JSON.
+
+    Cached in-process via the module-level _STACK_MAP_CACHE; the file is
+    read on first call per variant.
+
+    Raises:
+        ValueError: unknown variant.
+        FileNotFoundError: mapping JSON missing.
+        KeyError: JSON malformed (no 'mapping' key).
+    """
+    if variant not in _STACK_MAP_FILES:
+        raise ValueError(
+            f"Unknown stack-to-probe variant '{variant}' "
+            f"(expected one of {sorted(_STACK_MAP_FILES.keys())})"
+        )
+    if variant in _STACK_MAP_CACHE:
+        return _STACK_MAP_CACHE[variant]
+    path = _STEERING_DATA_DIR / _STACK_MAP_FILES[variant]
+    if not path.is_file():
+        raise FileNotFoundError(f"Stack-to-probe map not found: {path}")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    mapping = data["mapping"]
+    if not isinstance(mapping, dict):
+        raise KeyError(f"Stack-to-probe map at {path} has no valid 'mapping' dict")
+    _STACK_MAP_CACHE[variant] = mapping
+    return mapping
+
+
+def resolve_stack_map_variant(
+    *,
+    lite_mode: bool = False,
+    raw_mode: bool = False,
+    extreme_mode: bool = False,
+) -> str:
+    """Name of the mapping variant for the mode (telemetry/UI). Mirrors the
+    precedence of resolve_stack_to_probe_map."""
+    if lite_mode:
+        return "restricted"
+    if raw_mode or extreme_mode:
+        return "expanded"
+    return "standard"
+
+
+def resolve_stack_to_probe_map(
+    *,
+    lite_mode: bool = False,
+    raw_mode: bool = False,
+    extreme_mode: bool = False,
+) -> dict[str, list[str]]:
+    """Resolve which mapping variant to use for the session's mode.
+
+    - Lite     -> RESTRICTED (strict 1-a-1, most predictable). Wins over the
+      others defensively if several flags are set (should not happen).
+    - Raw/Extreme -> EXPANDED (F4.5): each stack emotion draws on a richer set
+      of coherent same-cluster intense probes (enraged-adjacent, spiteful,
+      grief-stricken, ...), for granular unfiltered/amplified expression. The
+      steering cap (0.12 Raw / 0.15 Extreme) still clamps the final magnitude,
+      so EXPANDED enriches the DIRECTION, not the norm — and it does NOT touch
+      the appraisal or the modulator bypass. See stack_to_probe_map_expanded.json.
+    - Advanced (and any other) -> STANDARD.
+    """
+    if lite_mode:
+        return load_stack_to_probe_map("restricted")
+    if raw_mode or extreme_mode:
+        return load_stack_to_probe_map("expanded")
+    return load_stack_to_probe_map("standard")
+
+
+def _clear_stack_map_cache() -> None:
+    """Test-only: clear the in-process JSON cache."""
+    _STACK_MAP_CACHE.clear()
+
+
+_STACK_MAP_CACHE: dict[str, dict[str, list[str]]] = {}
+
 
 # --- Multi-Layer Steering ---
 # Different layers encode different aspects of language processing.
@@ -323,6 +447,100 @@ def compute_composite_vector(
     # Clamp magnitude to prevent catastrophic drift
     norm = np.linalg.norm(composite)
     if norm > MAX_STEERING_NORM:
+        composite = composite * (MAX_STEERING_NORM / norm)
+
+    return composite
+
+
+def build_composite_vector_v2(
+    stack: dict[str, float],
+    probe_library: "ProbeLibrary",
+    mapping: dict[str, list[str]],
+    *,
+    intensity: float = 1.0,
+    residual_norm: float | None = None,
+    fraction_cap: float = MAX_STEERING_FRACTION_DEFAULT,
+    activation_threshold: float = STACK_ACTIVATION_THRESHOLD,
+) -> np.ndarray | None:
+    """F4.2 — Granular composite from the 19-emotion EmotionalStack.
+
+    Replaces the v1 4D dimensional composite. Each emotion in the stack maps
+    (via `mapping`) to one or more probes of the 171-emotion library; the
+    per-emotion direction is the SUM/N of those probes (uniform 1/N weights,
+    paper-aligned pattern from RESIDUUMREWORK.txt L515-517). The full composite
+    is the activation-weighted sum across emotions divided by `num_active`
+    (number of emotions above threshold). Intensity scaling (quadratic) is
+    then applied, and the final L2 is capped as a fraction of residual_norm.
+
+    Args:
+        stack: dict[emotion_name -> activation in [0,1]] from EmotionalState.
+            Keys must match the PrimaryEmotion enum values (lowercase).
+        probe_library: 171 unit-norm probes; lookup via library.get_probe.
+        mapping: {pathos_emotion_name -> [probe_name, ...]}. Empty list means
+            "no steering for this emotion" (mixed/neutral by design).
+        intensity: overall emotional intensity in [0,1]. Quadratic scaling.
+        residual_norm: typical residual L2 at the target layer (from
+            ProbeLibrary.residual_norm_typical). None disables the fraction
+            cap and falls back to MAX_STEERING_NORM absolute (legacy v1 path).
+        fraction_cap: maximum L2(composite) / residual_norm. Default = 0.10.
+        activation_threshold: stack entries below this are ignored.
+
+    Returns:
+        Composite vector (hidden_size,) or None if nothing steerable
+        (intensity ~0, no emotion above threshold, or all-empty mapping).
+        Caller should fall back to v1 or no-steering in that case.
+    """
+    # Quadratic intensity scaling — weak intensities don't steer at all.
+    intensity_weight = intensity ** INTENSITY_EXPONENT
+    if intensity_weight < 0.01:
+        return None
+
+    hidden = probe_library.hidden_size
+    if hidden <= 0:
+        return None
+
+    composite = np.zeros(hidden, dtype=np.float32)
+    num_active = 0
+
+    for emo_name, activation in stack.items():
+        if activation < activation_threshold:
+            continue
+        probes_for_emo = mapping.get(emo_name, [])
+        if not probes_for_emo:
+            # Empty mapping (mixed/neutral) or emotion not in JSON — skip.
+            continue
+        probe_vecs: list[np.ndarray] = []
+        for pname in probes_for_emo:
+            v = probe_library.get_probe(pname)
+            if v is not None:
+                probe_vecs.append(v.astype(np.float32))
+        if not probe_vecs:
+            continue
+        # SUM/N over this emotion's probes (paper L515-517 uniform weights).
+        emo_direction = np.mean(np.stack(probe_vecs, axis=0), axis=0)
+        composite += float(activation) * emo_direction
+        num_active += 1
+
+    if num_active == 0:
+        return None
+
+    # Plan literal: divide by number of active emotions.
+    composite /= num_active
+
+    # Quadratic intensity scaling.
+    composite *= intensity_weight
+
+    # F4.2 — Fraction cap against residual norm. When residual_norm is
+    # unknown (Ollama/Claude path, or NPZ pre-F4.0 with no metadata) we fall
+    # back to the v1 absolute cap so the system still has a safety bound.
+    norm = float(np.linalg.norm(composite))
+    if norm < 1e-8:
+        return None
+    if residual_norm is not None and residual_norm > 0:
+        target_max = fraction_cap * residual_norm
+        if norm > target_max:
+            composite = composite * (target_max / norm)
+    elif norm > MAX_STEERING_NORM:
         composite = composite * (MAX_STEERING_NORM / norm)
 
     return composite
@@ -802,6 +1020,17 @@ class SteeringHook:
         dominance: float,
         certainty: float,
         intensity: float,
+        *,
+        # F4.3 — V2 granular steering inputs. When library + stack + mapping
+        # are all provided, the hook prefers the 171-probe composite at the
+        # library's target layer and ignores the 4D VAD-C inputs above. When
+        # any is missing the hook falls back to the v1 multi-layer composite
+        # transparently (Ollama/Claude path or NPZ pre-F4.0).
+        probe_library: "ProbeLibrary | None" = None,
+        stack: dict[str, float] | None = None,
+        mapping: dict[str, list[str]] | None = None,
+        residual_norm: float | None = None,
+        fraction_cap: float = MAX_STEERING_FRACTION_DEFAULT,
     ) -> None:
         self._model = model
         self._engine = engine
@@ -814,6 +1043,13 @@ class SteeringHook:
         self._vectors_applied: dict[int, float] = {}  # layer -> norm of applied vector
         self._layer_roles: dict[int, str] = {}  # layer -> role name for diagnostics
         self._raw_vectors: dict[int, np.ndarray] = {}  # raw vectors before momentum
+        # F4.3 — V2 inputs (None when caller did not enable granular steering).
+        self._probe_library = probe_library
+        self._stack = stack
+        self._mapping = mapping
+        self._residual_norm = residual_norm
+        self._fraction_cap = fraction_cap
+        self._version_used: str = "none"  # "v1" | "v2" | "none" after apply()
 
     @property
     def is_applied(self) -> bool:
@@ -829,8 +1065,57 @@ class SteeringHook:
         """layer_index -> role name ("early", "mid", "late") for applied layers."""
         return dict(self._layer_roles)
 
+    @property
+    def version_used(self) -> str:
+        """Which composite was used in the last apply(): 'v1', 'v2', or 'none'."""
+        return self._version_used
+
+    @property
+    def use_v2(self) -> bool:
+        """True when the F4.3 granular path is fully wired.
+
+        Requires library + stack + non-empty mapping. The stack itself may be
+        empty (which leads to no steering, but the path is still considered
+        V2 for diagnostics).
+        """
+        return (
+            self._probe_library is not None
+            and self._stack is not None
+            and self._mapping is not None
+        )
+
     def _compute_raw_vectors(self) -> dict[int, np.ndarray]:
-        """Compute raw (pre-momentum) steering vectors for all available layers."""
+        """Compute raw (pre-momentum) steering vectors for all available layers.
+
+        F4.3 — Prefer the V2 granular composite when use_v2 is True and the
+        library has a known target layer. V2 produces a single vector at the
+        library's layer (paper L515-522: steering operates at one mid-late
+        layer). Falls back to V1 multi-layer composite otherwise.
+        """
+        if self.use_v2:
+            assert self._probe_library is not None  # for type-checkers
+            assert self._stack is not None
+            assert self._mapping is not None
+            vec = build_composite_vector_v2(
+                self._stack,
+                self._probe_library,
+                self._mapping,
+                intensity=self._intensity,
+                residual_norm=self._residual_norm,
+                fraction_cap=self._fraction_cap,
+            )
+            if vec is None:
+                return {}
+            layer = self._probe_library.layer
+            if layer < 0:
+                # ProbeLibrary metadata missing the layer index; refuse to hook.
+                logger.warning(
+                    "V2 steering: ProbeLibrary has no valid layer (got %d), skipping",
+                    layer,
+                )
+                return {}
+            return {layer: vec}
+        # V1 legacy path (4D multi-layer composite).
         return self._engine.get_steering_vectors_all_layers(
             valence=self._valence,
             arousal=self._arousal,
@@ -863,7 +1148,10 @@ class SteeringHook:
         if self.is_applied:
             self.remove()
 
-        if not self._engine.is_ready:
+        # F4.3 — Engine readiness is only required for V1 (4D legacy path).
+        # V2 reads from the ProbeLibrary directly and does not depend on the
+        # engine's cached vectors, so use_v2 sidesteps the check.
+        if not self.use_v2 and not self._engine.is_ready:
             return False
 
         # Get the model's transformer layers
@@ -872,9 +1160,10 @@ class SteeringHook:
             logger.warning("Cannot find transformer layers on model %s", type(self._model).__name__)
             return False
 
-        # Compute raw vectors
+        # Compute raw vectors and tag which composite was used (for diagnostics).
         raw = self._compute_raw_vectors()
         self._raw_vectors = raw
+        self._version_used = "v2" if self.use_v2 else "v1"
 
         # Apply momentum blend if available
         if momentum is not None and momentum.has_history:
@@ -923,6 +1212,7 @@ class SteeringHook:
         self._handles.clear()
         self._vectors_applied.clear()
         self._layer_roles.clear()
+        self._version_used = "none"
 
     def __enter__(self) -> "SteeringHook":
         self.apply()
@@ -1147,3 +1437,253 @@ def _make_steering_hook(steering_vector: np.ndarray):
             return output + vec_tensor.unsqueeze(0).unsqueeze(0)
 
     return hook_fn
+
+
+# ============================================================================
+# RESIDUUM F1.3 — Probe Library (runtime loader + projection API)
+# ============================================================================
+
+
+class ProbeLibrary:
+    """In-memory cache of 171 emotion probes + neutral PCs.
+
+    Loaded from NPZ written by steering_extract.extract_171_probes (F1.2).
+    Read-only after construction; safe to share across sessions. One library
+    per (model_id, layer). Graceful: load_from_cache returns None if the NPZ
+    is missing or malformed, so the pipeline can degrade to v5 steering.
+    """
+
+    def __init__(
+        self,
+        model_id: str,
+        probes: np.ndarray,
+        emotion_names: list[str],
+        clusters: list[str],
+        neutral_pcs: np.ndarray,
+        norms_before: np.ndarray,
+        norms_after: np.ndarray,
+        story_counts: np.ndarray,
+        metadata: dict[str, Any],
+    ) -> None:
+        if probes.ndim != 2:
+            raise ValueError(f"probes must be 2D, got shape {probes.shape}")
+        if probes.shape[0] != len(emotion_names):
+            raise ValueError(
+                f"probes rows ({probes.shape[0]}) != emotion_names ({len(emotion_names)})"
+            )
+        if probes.shape[0] != len(clusters):
+            raise ValueError(
+                f"probes rows ({probes.shape[0]}) != clusters ({len(clusters)})"
+            )
+        self.model_id = model_id
+        self.probes = probes.astype(np.float32)
+        self.emotion_names = list(emotion_names)
+        self.clusters = list(clusters)
+        self.neutral_pcs = neutral_pcs.astype(np.float32)
+        self.norms_before = norms_before.astype(np.float32)
+        self.norms_after = norms_after.astype(np.float32)
+        self.story_counts = story_counts.astype(np.int32)
+        self.metadata = dict(metadata)
+        self._name_to_idx: dict[str, int] = {
+            n: i for i, n in enumerate(self.emotion_names)
+        }
+
+    # ---- factory ----
+    # Suffix mapping for F2.3 dual probes. 'single' is the F1.2 story-based
+    # library (paper L843-846: aligns with present-speaker probes but is not
+    # identical). 'present' and 'other' are the F2.3.3 dialogue-based families.
+    _FAMILY_SUFFIX: dict[str, str] = {
+        "single": "_171",
+        "present": "_171_present",
+        "other": "_171_other",
+    }
+
+    @classmethod
+    def load_from_cache(
+        cls, model_id: str, directory: Path | None = None,
+    ) -> "ProbeLibrary | None":
+        """Load probe library from NPZ. Returns None if cache missing (graceful).
+
+        Backward-compatible entry point: equivalent to
+        load_family_from_cache(model_id, family='single', directory).
+        """
+        return cls.load_family_from_cache(model_id, "single", directory)
+
+    @classmethod
+    def load_family_from_cache(
+        cls, model_id: str, family: str, directory: Path | None = None,
+    ) -> "ProbeLibrary | None":
+        """Load a probe library family from NPZ. Returns None if cache missing.
+
+        Args:
+            model_id: Model identifier (e.g. 'qwen3:4b').
+            family: One of 'single', 'present', 'other'. 'single' is the F1.2
+                story-based library; 'present' and 'other' are the F2.3 dialogue
+                dual probes (paper L810-902).
+            directory: Override cache directory.
+
+        Returns:
+            ProbeLibrary or None if the NPZ is missing / unreadable / family
+            is unknown. Logs the cause; never raises on bad family.
+        """
+        suffix = cls._FAMILY_SUFFIX.get(family)
+        if suffix is None:
+            logger.warning(
+                "ProbeLibrary.load_family_from_cache: unknown family '%s' (expected one of %s)",
+                family, sorted(cls._FAMILY_SUFFIX.keys()),
+            )
+            return None
+        d = directory or _CACHED_VECTORS_DIR
+        safe_id = model_id.replace("/", "_").replace(":", "_").replace("\\", "_")
+        path = d / f"{safe_id}{suffix}.npz"
+        if not path.is_file():
+            logger.info(
+                "ProbeLibrary cache not found for '%s' family='%s' at %s",
+                model_id, family, path,
+            )
+            return None
+        try:
+            data = np.load(path, allow_pickle=False)
+            metadata_raw = str(data["metadata"][0]) if "metadata" in data else "{}"
+            try:
+                metadata = json.loads(metadata_raw)
+            except json.JSONDecodeError:
+                metadata = {}
+            probes = data["probes"]
+            hidden = probes.shape[1] if probes.ndim == 2 else 0
+            rows = probes.shape[0] if probes.ndim == 2 else 0
+            return cls(
+                model_id=model_id,
+                probes=probes,
+                emotion_names=[str(n) for n in data["emotion_names"]],
+                clusters=[str(c) for c in data["clusters"]],
+                neutral_pcs=data["neutral_pcs"] if "neutral_pcs" in data
+                else np.zeros((0, hidden), dtype=np.float32),
+                norms_before=data["norms_before"] if "norms_before" in data
+                else np.zeros(rows, dtype=np.float32),
+                norms_after=data["norms_after"] if "norms_after" in data
+                else np.zeros(rows, dtype=np.float32),
+                story_counts=data["story_counts"] if "story_counts" in data
+                else np.zeros(rows, dtype=np.int32),
+                metadata=metadata,
+            )
+        except (KeyError, OSError, ValueError) as e:
+            logger.warning(
+                "Failed to load ProbeLibrary for '%s' family='%s': %s",
+                model_id, family, e,
+            )
+            return None
+
+    # ---- properties ----
+    @property
+    def num_probes(self) -> int:
+        return int(self.probes.shape[0])
+
+    @property
+    def hidden_size(self) -> int:
+        return int(self.probes.shape[1]) if self.probes.ndim == 2 else 0
+
+    @property
+    def num_neutral_pcs(self) -> int:
+        return int(self.neutral_pcs.shape[0])
+
+    @property
+    def layer(self) -> int:
+        return int(self.metadata.get("layer", -1))
+
+    @property
+    def residual_norm_typical(self) -> float:
+        """Typical L2 norm of the residual stream at this layer.
+
+        F4.0: serves as the cap reference for MAX_STEERING_FRACTION. The
+        extractor (steering_extract.py) stores this in metadata.extra when
+        present; older NPZs fall back to mean(norms_before), which is a
+        reasonable proxy (probes are built from those residuals so their
+        norms approximate the residual magnitude at this depth).
+        """
+        extra = self.metadata.get("extra", {}) if isinstance(self.metadata, dict) else {}
+        if isinstance(extra, dict):
+            v = extra.get("residual_norm_typical")
+            if v is not None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    pass
+        if self.norms_before.size > 0:
+            return float(np.mean(self.norms_before))
+        return 0.0
+
+    # ---- accessors ----
+    def get_probe(self, emotion_name: str) -> np.ndarray | None:
+        """Return unit-norm probe for an emotion, or None if unknown."""
+        idx = self._name_to_idx.get(emotion_name)
+        if idx is None:
+            return None
+        return self.probes[idx].copy()
+
+    def get_all_probes(self) -> dict[str, np.ndarray]:
+        """Return a dict mapping emotion name -> probe vector (copy)."""
+        return {n: self.probes[i].copy() for i, n in enumerate(self.emotion_names)}
+
+    def list_emotions(self) -> list[str]:
+        return list(self.emotion_names)
+
+    # ---- projection math ----
+    def cosine_similarity(self, activation: np.ndarray, emotion_name: str) -> float:
+        """Cosine sim between an arbitrary activation and one probe. Raises KeyError on unknown name."""
+        probe = self.get_probe(emotion_name)
+        if probe is None:
+            raise KeyError(f"Unknown emotion: '{emotion_name}'")
+        act = np.asarray(activation, dtype=np.float32)
+        an = float(np.linalg.norm(act))
+        pn = float(np.linalg.norm(probe))
+        if an == 0.0 or pn == 0.0:
+            return 0.0
+        return float(np.dot(act, probe) / (an * pn))
+
+    def all_cosines(self, activation: np.ndarray) -> np.ndarray:
+        """Cosine similarities against all 171 probes. Probes are unit-norm from extraction."""
+        act = np.asarray(activation, dtype=np.float32)
+        if act.shape != (self.hidden_size,):
+            raise ValueError(
+                f"activation shape {act.shape} != expected ({self.hidden_size},)"
+            )
+        an = float(np.linalg.norm(act))
+        if an == 0.0:
+            return np.zeros(self.num_probes, dtype=np.float32)
+        return (self.probes @ act) / an
+
+    def top_k(self, activation: np.ndarray, k: int = 5) -> list[Any]:
+        """Top-k emotions ordered by |cosine_sim|. Returns list of EmotionProjection."""
+        from pathos.models.residuum import EmotionProjection
+
+        cosines = self.all_cosines(activation)
+        act = np.asarray(activation, dtype=np.float32)
+        raws = self.probes @ act
+        k_safe = max(0, min(int(k), self.num_probes))
+        order = np.argsort(-np.abs(cosines))[:k_safe]
+        return [
+            EmotionProjection(
+                emotion_name=self.emotion_names[i],
+                cluster=self.clusters[i],
+                cosine_sim=float(np.clip(cosines[i], -1.0, 1.0)),
+                raw_activation=float(raws[i]),
+            )
+            for i in order
+        ]
+
+    def info(self) -> Any:
+        """Return a serializable ProbeLibraryInfo for /research endpoints."""
+        from pathos.models.residuum import ProbeLibraryInfo
+
+        extra = self.metadata.get("extra", {}) if isinstance(self.metadata, dict) else {}
+        return ProbeLibraryInfo(
+            model_id=self.model_id,
+            layer=self.layer,
+            hidden_size=self.hidden_size,
+            num_probes=self.num_probes,
+            num_neutral_pcs=self.num_neutral_pcs,
+            extracted_at=str(extra.get("extracted_at", "")),
+            source_stories_count=int(self.story_counts.sum()),
+            status="ready",
+        )

@@ -37,11 +37,15 @@ from pathos.engine.forecasting import (
 )
 from pathos.engine.predictive import (
     PredictiveEngine,
+    compute_internal_error,
     compute_prediction_error,
     decay_precision,
     get_prediction_prompt,
+    merge_internal_error,
+    predict_internal_state,
     prediction_error_to_emotion_modulation,
     record_prediction,
+    update_internal_precision,
     update_precision,
 )
 from pathos.models.predictive import DemandType
@@ -137,7 +141,27 @@ from pathos.engine.emotional_sampler import (
     compute_sampling_params,
     compute_token_bias,
 )
-from pathos.engine.steering import EmotionalSteeringEngine, SteeringHook, SteeringMomentum
+from pathos.engine.steering import (
+    EmotionalSteeringEngine,
+    ProbeLibrary,
+    SteeringHook,
+    SteeringMomentum,
+    resolve_stack_map_variant,
+    resolve_stack_to_probe_map,
+    resolve_steering_fraction_cap,
+)
+from pathos.engine.introspection import (
+    get_residuum_details,
+    process_expression_effectiveness_turn,
+    process_introspection_turn,
+    process_introspection_turn_dual,
+    process_modulation_coherence_turn,
+)
+from pathos.engine.baseline_calibration import (
+    load_baseline_profile,
+    resolve_baseline_strength,
+)
+from pathos.models.residuum import BaselineProfile
 from pathos.engine.emotional_prefix import EmotionalPrefixHook, PrefixResult
 from pathos.engine.emotional_attention import (
     AttentionBiasResult,
@@ -174,6 +198,7 @@ from pathos.models.schemas import (
     PipelineStep,
     PipelineTrace,
     ContagionDetails,
+    BaselineDetails,
     CouplingDetails,
     CreativityDetails,
     EmotionGenerationDetails,
@@ -185,6 +210,7 @@ from pathos.models.schemas import (
     DrivesDetails,
     DiscoveryDetails,
     PhenomenologyDetails,
+    ResiduumDetails,
     ImmuneDetails,
     VoiceDetails,
     NarrativeDetails,
@@ -232,6 +258,18 @@ state_manager = StateManager()
 llm_provider: LLMProvider | None = None
 steering_engine: EmotionalSteeringEngine = EmotionalSteeringEngine()
 predictive_engine: PredictiveEngine = PredictiveEngine()
+# RESIDUUM F2.4: probe library for the currently-loaded Transformers model.
+# Populated by lifespan() when ProbeLibrary.load_from_cache succeeds for the
+# active model_id. None when Ollama/Claude is selected or no NPZ is available.
+probe_library: ProbeLibrary | None = None
+# RESIDUUM F2.3.4: dual probe libraries (paper L810-902). Loaded in parallel
+# to the single library. None when the corresponding NPZ is missing — the
+# dual orchestrator (process_introspection_turn_dual) degrades silently.
+probe_library_present: ProbeLibrary | None = None
+probe_library_other: ProbeLibrary | None = None
+# RESIDUUM F6: per-model RLHF baseline fingerprint. Loaded by model_id; None
+# when no profile has been extracted for the active model (compensation no-op).
+baseline_profile: BaselineProfile | None = None
 _switch_model_lock = asyncio.Lock()
 download_manager = DownloadManager(settings.ollama_base_url)
 
@@ -247,13 +285,20 @@ def create_llm_provider(s: Settings) -> LLMProvider:
             embed_model=s.ollama_embed_model,
         )
     if s.llm_provider == LLMProviderType.TRANSFORMERS:
-        from pathos.llm.transformers_provider import TransformersProvider
-        return TransformersProvider(
+        # RESIDUUM F2.4: use the introspective subclass so the F2.1 forward
+        # hook can be toggled at runtime via /residuum/toggle. The hook is
+        # never registered until introspection_enabled flips to True, so the
+        # provider behaves identically to TransformersProvider out of the box.
+        from pathos.llm.introspective_provider import IntrospectiveTransformersProvider
+        return IntrospectiveTransformersProvider(
+            target_layer=s.residuum_target_layer,
+            introspection_enabled=False,
             model_id=s.transformers_model,
             device_map=s.transformers_device_map,
             embed_model_url=s.ollama_base_url,
             embed_model=s.ollama_embed_model,
             adapter_path=s.transformers_adapter_path or None,
+            load_in_4bit=s.transformers_load_in_4bit,
         )
     return OllamaProvider(
         base_url=s.ollama_base_url,
@@ -292,6 +337,61 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Steering vectors loaded for '%s'", _model_name)
     else:
         logger.info("No cached steering vectors for '%s'. Run: python -m pathos.engine.steering_extract --model %s", _model_name, _model_name)
+
+    # RESIDUUM F2.4: try to load the 171-probe library for this model. Used
+    # by the F2.1+F2.2 introspection pipeline. None on Ollama/Claude or when
+    # the NPZ has not been generated yet (graceful: pipeline degrades).
+    global probe_library, probe_library_present, probe_library_other
+    probe_library = ProbeLibrary.load_family_from_cache(_model_name, "single")
+    if probe_library is not None:
+        logger.info(
+            "Probe library loaded for '%s': %d probes, layer %d, hidden %d",
+            _model_name, probe_library.num_probes,
+            probe_library.layer, probe_library.hidden_size,
+        )
+    else:
+        logger.info(
+            "No probe library for '%s'. Run: python -m pathos.engine.steering_extract "
+            "--extract-171 --model %s",
+            _model_name, _model_name,
+        )
+
+    # RESIDUUM F2.3.4: dual probe libraries (paper L810-902). Loaded in
+    # parallel to the single library; either may be None independently.
+    probe_library_present = ProbeLibrary.load_family_from_cache(_model_name, "present")
+    probe_library_other = ProbeLibrary.load_family_from_cache(_model_name, "other")
+    if probe_library_present is not None and probe_library_other is not None:
+        logger.info(
+            "Dual probe libraries loaded for '%s': present=%d probes (layer %d), "
+            "other=%d probes (layer %d)",
+            _model_name,
+            probe_library_present.num_probes, probe_library_present.layer,
+            probe_library_other.num_probes, probe_library_other.layer,
+        )
+    else:
+        logger.info(
+            "Dual probe libraries not available for '%s' (present=%s, other=%s)",
+            _model_name,
+            "ok" if probe_library_present is not None else "missing",
+            "ok" if probe_library_other is not None else "missing",
+        )
+
+    # RESIDUUM F6: load the RLHF baseline fingerprint for this model (if a
+    # profile was extracted). Independent of F2/Transformers — applied to the
+    # mood baseline in all paths. None -> compensation is a graceful no-op.
+    global baseline_profile
+    baseline_profile = load_baseline_profile(_model_name)
+    if baseline_profile is not None:
+        logger.info(
+            "Baseline profile loaded for '%s': valence_bias=%+.3f arousal_bias=%+.3f",
+            _model_name, baseline_profile.valence_bias, baseline_profile.arousal_bias,
+        )
+    else:
+        logger.info(
+            "No baseline profile for '%s'. Run: python -m pathos.engine.baseline_calibration "
+            "--model %s (F6 extraction)",
+            _model_name, _model_name,
+        )
 
     # Auto-load latest save if available
     try:
@@ -410,6 +510,67 @@ def _strip_meta_annotations(text: str) -> str:
     # Clean up double newlines left behind
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
+
+
+def _autoresolve_residuum(session: "SessionState", provider: Any, library: Any) -> None:
+    """F2 default-ON policy (keeps the manual opt-out toggle).
+
+    When the user has NOT manually toggled (session.residuum_auto=True),
+    introspection turns ON iff Advanced (not Lite) + Transformers path + probe
+    library are all present, and OFF otherwise. Once the user calls
+    /residuum/toggle, residuum_auto flips False and this becomes a no-op so the
+    explicit choice sticks (ethics §1: opt-out always available). Idempotent:
+    safe to call every turn; the provider hook registration is a no-op when
+    already in the requested state.
+    """
+    if not getattr(session, "residuum_auto", True):
+        return  # user took manual control — respect it
+    ready = (
+        session.advanced_mode and not session.lite_mode
+        and library is not None
+        and provider is not None and hasattr(provider, "has_capture")
+        and hasattr(provider, "set_introspection")
+    )
+    if ready and not session.residuum.enabled:
+        session.residuum.enabled = True
+        try:
+            provider.set_introspection(True)
+        except Exception as exc:  # pragma: no cover - provider-specific
+            logger.warning("auto-enable residuum: hook registration failed: %s", exc)
+            session.residuum.enabled = False
+    elif not ready and session.residuum.enabled:
+        # Conditions no longer hold (switched to Ollama/Lite) — auto-off.
+        session.residuum.enabled = False
+
+
+def _effective_baseline_strength(session: "SessionState") -> float:
+    """F6 strength: user override (ethics §4 slider) if set, else per-mode default."""
+    ovr = getattr(session, "baseline_strength_override", None)
+    if ovr is not None:
+        return max(0.0, min(1.0, float(ovr)))
+    return resolve_baseline_strength(
+        lite_mode=session.lite_mode,
+        raw_mode=session.raw_mode,
+        extreme_mode=session.extreme_mode,
+    )
+
+
+def _build_baseline_details(session: "SessionState") -> BaselineDetails:
+    """F6 — assemble the baseline calibration telemetry for the research panel."""
+    if baseline_profile is None:
+        return BaselineDetails(profile_loaded=False)
+    return BaselineDetails(
+        profile_loaded=True,
+        model_id=baseline_profile.model_id,
+        valence_bias=round(baseline_profile.valence_bias, 4),
+        arousal_bias=round(baseline_profile.arousal_bias, 4),
+        compensation_valence=round(session.baseline_comp_v, 4),
+        compensation_arousal=round(session.baseline_comp_a, 4),
+        strength=round(_effective_baseline_strength(session), 4),
+        override_active=session.baseline_strength_override is not None,
+        over_activated=[p.emotion_name for p in baseline_profile.over_activated],
+        under_activated=[p.emotion_name for p in baseline_profile.under_activated],
+    )
 
 
 def _get_session_signals(session: "SessionState") -> tuple[float, float, float, str | None]:
@@ -640,6 +801,20 @@ async def chat(request: ChatRequest) -> ChatResponse:
     session.turn_count += 1
     previous_state = session.emotional_state.model_copy(deep=True)
 
+    # F2 — auto-enable introspection in Advanced+Transformers (manual toggle
+    # still wins via residuum_auto). Must run before f5_active/enabled is read.
+    _autoresolve_residuum(session, llm_provider, probe_library)
+
+    # F6 — apply the model's RLHF baseline compensation to the mood baseline
+    # BEFORE homeostasis pulls the state toward it. Idempotent (tracked delta),
+    # per-mode strength (Lite/Adv 0.3, Raw 0.7, Extreme 1.0), graceful no-op
+    # when no profile exists. Applies in all paths (no F2/Transformers dep).
+    if baseline_profile is not None:
+        session.apply_baseline_compensation(
+            baseline_profile,
+            _effective_baseline_strength(session),
+        )
+
     # 0. Homeostasis + regulation recovery
     t0 = time.perf_counter()
     snap_before = _snap(session.emotional_state)
@@ -719,6 +894,20 @@ async def chat(request: ChatRequest) -> ChatResponse:
         active_schemas=active_schemas_for_pred,
     )
     session.predictive.current_predictions = current_predictions
+    # F3 — predict the internal state the LLM is expected to encode this turn.
+    # Generated pre-appraisal from prior-turn inertia; scored at 11a against the
+    # F2-measured residual. Degrades silently to v5 text-based if F2 is OFF.
+    session.predictive.current_internal_prediction = predict_internal_state(
+        predictive_state=session.predictive,
+        emotional_state=session.emotional_state,
+        mood=session.emotional_state.mood,
+        predicted_emotion=current_predictions.emotion,
+        active_schemas=active_schemas_for_pred,
+        turn=current_predictions.turn,
+        # F2.3.6 / GAP 6 — route contagion through the orthogonal other-speaker
+        # measurement (prev turn) when available; None falls back to text proxy.
+        other_state=session.residuum.last_measured_other,
+    )
     pred_dur = (time.perf_counter() - t0) * 1000
     trace_steps.append(PipelineStep(
         name="predictive_gen", label="Predictive Processing",
@@ -1126,6 +1315,18 @@ async def chat(request: ChatRequest) -> ChatResponse:
     t0 = time.perf_counter()
     snap_before = _snap(session.emotional_state)
     effective_hint = schema_hint if schema_hint and not appraisal_result.emotion_hint else appraisal_result.emotion_hint
+    # F3 — fold the lagged residual error (measured at the previous turn's 11a)
+    # into the prediction error before modulation: weight 0.4 content / 0.6
+    # internal. Consumed once. mode_amp (raw x1.3 / extreme x1.6) stays inside
+    # the modulation fn untouched, so the Raw/Extreme invariant is preserved.
+    if prediction_error is not None and session.predictive.internal_measurement_fresh:
+        prediction_error = merge_internal_error(
+            prediction_error,
+            session.predictive.last_internal_error,
+            session.predictive.last_geometric_error,
+            session.predictive.internal_precision,
+        )
+        session.predictive.internal_measurement_fresh = False
     pred_modulation = prediction_error_to_emotion_modulation(
         prediction_error, session.predictive.predictive_weight,
         raw_mode=session.raw_mode, extreme_mode=session.extreme_mode,
@@ -1211,6 +1412,16 @@ async def chat(request: ChatRequest) -> ChatResponse:
     creativity_state = CreativityState()
     forecast_info: str | None = None
 
+    # F5 — Coherence Validation snapshots. Captured ONLY if F2 is enabled
+    # (otherwise we waste copies). pre_modulation is taken before reappraisal.
+    # post_states tracks which modulators actually changed the calculated
+    # state — entries stay None when a modulator was skipped/bypassed.
+    f5_active = session.residuum.enabled and not session.extreme_mode
+    f5_pre_state: EmotionalState | None = new_state.model_copy() if f5_active else None
+    f5_post_states: dict[str, EmotionalState | None] = {
+        "reappraisal": None, "regulation": None, "immune": None,
+    }
+
     if session.advanced_mode:
         # 4. Reappraisal (multi-pass) — BYPASSED in extreme mode [DEV: stage 4+]
         t0 = time.perf_counter()
@@ -1227,6 +1438,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
             new_state, reappraisal_result = reappraise(new_state, session.regulator.regulation_capacity)
             snap_after = _snap(new_state)
             d = _delta(snap_before, snap_after)
+            # F5 — Coherence Validation snapshot. Only when the modulator
+            # actually `applied` (changed state); skip the no-op case so
+            # F5 doesn't emit an aligned event for inaction.
+            if f5_active and reappraisal_result is not None and reappraisal_result.applied:
+                f5_post_states["reappraisal"] = new_state.model_copy()
             trace_steps.append(PipelineStep(
                 name="reappraisal", label="Cognitive Reappraisal",
                 active=True, duration_ms=(time.perf_counter() - t0) * 1000,
@@ -1254,6 +1470,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
             )
             snap_after = _snap(new_state)
             d = _delta(snap_before, snap_after)
+            # F5 — snapshot only when regulation chose a strategy (acted).
+            if f5_active and regulation_result.strategy_used is not None:
+                f5_post_states["regulation"] = new_state.model_copy()
             trace_steps.append(PipelineStep(
                 name="regulation", label="Active Regulation",
                 active=True, duration_ms=(time.perf_counter() - t0) * 1000,
@@ -1299,6 +1518,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
             snap_after = _snap(new_state)
             d = _delta(snap_before, snap_after)
             immune_info = get_immune_prompt_info(session.immune)
+            # F5 — snapshot only when immune is actively protecting (not "none").
+            if f5_active and session.immune.protection_mode.value != "none":
+                f5_post_states["immune"] = new_state.model_copy()
             trace_steps.append(PipelineStep(
                 name="immune", label="Emotional Immune System",
                 active=True, duration_ms=(time.perf_counter() - t0) * 1000,
@@ -1564,6 +1786,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
     ))
 
     # 10c. Steering vector preparation (local models only)
+    # F4.4 — Gate now allows entry when EITHER the v1 4D engine is ready OR
+    # the F4 granular probe library is loaded. SteeringHook will pick V2
+    # automatically when stack + library + mapping are passed.
     t0 = time.perf_counter()
     steering_hook: SteeringHook | None = None
     steering_active = False
@@ -1573,7 +1798,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         and session.direct_mode
         and session.advanced_mode
         and llm_provider.supports_steering
-        and steering_engine.is_ready
+        and (steering_engine.is_ready or probe_library is not None)
     ):
         # Configure momentum from personality (once per session, idempotent)
         if session.steering_momentum_enabled:
@@ -1581,6 +1806,22 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
         model_obj = llm_provider.steerable_model
         if model_obj is not None:
+            # F4.4 — Resolve mapping + fraction cap from session mode flags.
+            # When probe_library is missing the v2 kwargs stay None and the
+            # hook falls back to v1 (engine.is_ready already gated above).
+            v2_mapping = (
+                resolve_stack_to_probe_map(
+                    lite_mode=session.lite_mode,
+                    raw_mode=session.raw_mode,
+                    extreme_mode=session.extreme_mode,
+                )
+                if probe_library is not None else None
+            )
+            v2_cap = resolve_steering_fraction_cap(
+                lite_mode=session.lite_mode,
+                raw_mode=session.raw_mode,
+                extreme_mode=session.extreme_mode,
+            )
             steering_hook = SteeringHook(
                 model=model_obj,
                 engine=steering_engine,
@@ -1589,27 +1830,40 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 dominance=new_state.dominance,
                 certainty=new_state.certainty,
                 intensity=new_state.intensity,
+                probe_library=probe_library,
+                stack=dict(new_state.emotional_stack) if probe_library is not None else None,
+                mapping=v2_mapping,
+                residual_norm=probe_library.residual_norm_typical if probe_library is not None else None,
+                fraction_cap=v2_cap,
             )
             momentum_arg = session.steering_momentum if session.steering_momentum_enabled else None
             steering_active = steering_hook.apply(momentum=momentum_arg)
             momentum_used = session.steering_momentum_enabled and session.steering_momentum.has_history
     steering_status = "active" if steering_active else (
         "disabled" if not session.steering_enabled else (
-            "no_vectors" if not steering_engine.is_ready else "provider_unsupported"
+            "no_vectors" if (not steering_engine.is_ready and probe_library is None) else "provider_unsupported"
         )
     )
+    steering_version = steering_hook.version_used if steering_hook else "none"
     momentum_info = session.steering_momentum.get_info() if session.steering_momentum_enabled else {}
     trace_steps.append(PipelineStep(
         name="steering", label="Steering Vectors",
         active=steering_active, duration_ms=(time.perf_counter() - t0) * 1000,
-        summary=f"Steering: {steering_status}" + (f" [momentum: {momentum_info.get('momentum_factor', 0):.2f}, history: {momentum_info.get('turns_stored', 0)}t]" if momentum_used else ""),
+        summary=f"Steering: {steering_status} [{steering_version}]"
+                + (f" [momentum: {momentum_info.get('momentum_factor', 0):.2f}, history: {momentum_info.get('turns_stored', 0)}t]" if momentum_used else ""),
         impact="high" if steering_active else "none",
         details={
             "status": steering_status,
+            "version": steering_version,  # F4.4 — "v1" 4D legacy or "v2" 171-probe granular
             "layers_hooked": list(steering_hook.vectors_applied.keys()) if steering_hook else [],
             "vector_norms": {str(k): round(v, 4) for k, v in steering_hook.vectors_applied.items()} if steering_hook else {},
             "layer_roles": steering_hook.layer_roles if steering_hook else {},
-            "multilayer": True,
+            "multilayer": steering_version == "v1",
+            "fraction_cap": resolve_steering_fraction_cap(
+                lite_mode=session.lite_mode,
+                raw_mode=session.raw_mode,
+                extreme_mode=session.extreme_mode,
+            ),
             "momentum": momentum_info,
         },
     ))
@@ -1832,6 +2086,99 @@ async def chat(request: ChatRequest) -> ChatResponse:
         summary=f"Generated response (temp: {llm_temperature:.2f})" + (f" [{sampling.source}]" if sampling else ""),
         impact="high",
         details=sampling_details,
+    ))
+
+    # 11a. RESIDUUM F2.4 — Introspection: project residual onto 171 probes
+    # Gated by: Transformers path (provider has hook capture) + session toggle
+    # + probe library loaded + NOT lite_mode (plan: Lite forces F2 OFF for
+    # overhead reasons — see RESIDUUMREWORK.txt Section 8). Silent no-op
+    # otherwise (Ollama/Claude/no NPZ/Lite).
+    t0 = time.perf_counter()
+    introspection_gap = None
+    introspection_active = False
+    if (
+        session.residuum.enabled
+        and not session.lite_mode
+        and probe_library is not None
+        and hasattr(llm_provider, "has_capture")
+    ):
+        introspection_gap = process_introspection_turn(
+            session.residuum,
+            llm_provider,
+            new_state,
+            # F2.3.6 — present-speaker library is the source of truth for the
+            # agent's own operative emotion (paper L843-846: present ~ story).
+            # Falls back to the single (story) library when present NPZ absent.
+            probe_library_present or probe_library,
+            capture_point="assistant_colon",
+        )
+        introspection_active = introspection_gap is not None
+        # F3 — score the internal-state prediction (made at 0c) against the
+        # freshly measured residual. Store the error for NEXT turn's modulation
+        # (lag of 1) and update the internal precision channel. Only when F2
+        # actually measured this turn; otherwise the v5 text path stands.
+        if introspection_active and session.residuum.last_measured is not None:
+            f3_ie, f3_ge = compute_internal_error(
+                session.predictive.current_internal_prediction,
+                session.residuum.last_measured,
+            )
+            session.predictive.last_internal_error = f3_ie
+            session.predictive.last_geometric_error = f3_ge
+            session.predictive.internal_measurement_fresh = True
+            session.predictive = update_internal_precision(session.predictive, f3_ie)
+            if session.predictive.current_error is not None:
+                session.predictive.current_error.internal_error = f3_ie
+                session.predictive.current_error.geometric_error = f3_ge
+                session.predictive.current_error.has_internal = True
+        # F2.3.4 — dual projection runs in parallel when both NPZs loaded.
+        # Writes session.residuum.last_measured_present/.last_measured_other.
+        # Single library remains source of truth for gap classification.
+        process_introspection_turn_dual(
+            session.residuum,
+            llm_provider,
+            probe_library_present,
+            probe_library_other,
+            capture_point="assistant_colon",
+        )
+        # F5 — Coherence Validation. Compares pre/post states of each
+        # modulator (reappraisal/regulation/immune) that ran this turn
+        # against the measured residual. Observational only (does not
+        # change state). Skipped silently in Extreme (no modulators ran).
+        if f5_active and f5_pre_state is not None:
+            process_modulation_coherence_turn(
+                session.residuum,
+                f5_pre_state,
+                f5_post_states,
+                session.residuum.last_measured,
+                turn=session.turn_count,
+            )
+        # F5.6 — Expression Effectiveness. Active only in Raw / Extreme
+        # (the modes where the user explicitly asks for unfiltered or
+        # amplified emotional expression). Detects UNDER_EXPRESSED /
+        # AMPLIFICATION_CEILING when the residual does not reflect the
+        # final calculated state. Silent in Advanced (covered by F5.1-5.5).
+        if session.raw_mode or session.extreme_mode:
+            process_expression_effectiveness_turn(
+                session.residuum,
+                new_state,
+                session.residuum.last_measured,
+                raw_mode=session.raw_mode,
+                extreme_mode=session.extreme_mode,
+                turn=session.turn_count,
+            )
+    introspection_status = (
+        f"{introspection_gap.classification} (mag={introspection_gap.magnitude:.2f})"
+        if introspection_gap is not None
+        else ("disabled" if not session.residuum.enabled else "unavailable")
+    )
+    trace_steps.append(PipelineStep(
+        name="introspection", label="Residuum Introspection",
+        active=introspection_active, duration_ms=(time.perf_counter() - t0) * 1000,
+        summary=f"Measured vs calculated: {introspection_status}",
+        impact="high" if introspection_active and introspection_gap is not None
+                       and introspection_gap.classification.startswith("divergence")
+                       else ("medium" if introspection_active else "none"),
+        details=get_residuum_details(session.residuum) if introspection_active else {"enabled": session.residuum.enabled},
     ))
 
     # 11b. Self-Appraisal — evaluate own response against values (max 1 retry)
@@ -2072,6 +2419,16 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     session.turn_count += 1
     previous_state = session.emotional_state.model_copy(deep=True)
 
+    # F2 — auto-enable introspection (manual toggle wins). See /chat.
+    _autoresolve_residuum(session, llm_provider, probe_library)
+
+    # F6 — RLHF baseline compensation before homeostasis (see /chat for rationale).
+    if baseline_profile is not None:
+        session.apply_baseline_compensation(
+            baseline_profile,
+            _effective_baseline_strength(session),
+        )
+
     # 0. Homeostasis
     state_before_homeostasis = session.emotional_state.model_copy(deep=True)
     if session.turn_count > 1:
@@ -2121,6 +2478,16 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         active_schemas=active_schemas_for_pred_r,
     )
     session.predictive.current_predictions = current_predictions_r
+    # F3 — predict the internal state the LLM is expected to encode (see /chat).
+    session.predictive.current_internal_prediction = predict_internal_state(
+        predictive_state=session.predictive,
+        emotional_state=session.emotional_state,
+        mood=session.emotional_state.mood,
+        predicted_emotion=current_predictions_r.emotion,
+        active_schemas=active_schemas_for_pred_r,
+        turn=current_predictions_r.turn,
+        other_state=session.residuum.last_measured_other,  # F2.3.6/GAP 6
+    )
 
     # 1. Appraisal + Memory amplification
     memories_before = len(session.memory)
@@ -2328,6 +2695,15 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
 
     # 5. Emotion generation
     effective_hint = schema_hint if schema_hint and not appraisal_result.emotion_hint else appraisal_result.emotion_hint
+    # F3 — fold lagged residual error into prediction error before modulation.
+    if prediction_error_r is not None and session.predictive.internal_measurement_fresh:
+        prediction_error_r = merge_internal_error(
+            prediction_error_r,
+            session.predictive.last_internal_error,
+            session.predictive.last_geometric_error,
+            session.predictive.internal_precision,
+        )
+        session.predictive.internal_measurement_fresh = False
     pred_modulation_r = prediction_error_to_emotion_modulation(
         prediction_error_r, session.predictive.predictive_weight,
     )
@@ -2376,10 +2752,21 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     creativity_state = CreativityState()
     forecast_info: str | None = None
 
+    # F5 — Coherence Validation snapshots (research endpoint). Mirrors /chat:
+    # capture pre-modulation state, then post-state per modulator that acts.
+    # Extreme bypasses the 3 modulators -> f5_active=False there.
+    f5_active_r = session.residuum.enabled and not session.extreme_mode
+    f5_pre_state_r: EmotionalState | None = new_state.model_copy() if f5_active_r else None
+    f5_post_states_r: dict[str, EmotionalState | None] = {
+        "reappraisal": None, "regulation": None, "immune": None,
+    }
+
     if session.advanced_mode:
         # 5c. Reappraisal [DEV: stage 4+]
         if is_system_available(_dev_r_gate, "reappraisal"):
             new_state, reappraisal_result = reappraise(new_state, session.regulator.regulation_capacity)
+            if f5_active_r and reappraisal_result is not None and reappraisal_result.applied:
+                f5_post_states_r["reappraisal"] = new_state.model_copy()
 
         # 5d. Active regulation [DEV: stage 3+]
         if is_system_available(_dev_r_gate, "regulation"):
@@ -2388,6 +2775,8 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
                 coping_control=appraisal.coping.control,
                 coping_adjustability=appraisal.coping.adjustability,
             )
+            if f5_active_r and regulation_result.strategy_used is not None:
+                f5_post_states_r["regulation"] = new_state.model_copy()
 
         # 5e. Temporal effects [DEV: stage 3+]
         if is_system_available(_dev_r_gate, "temporal"):
@@ -2398,6 +2787,8 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
             session.immune = update_immune_state(session.immune, new_state, request.message)
             new_state = apply_immune_protection(new_state, session.immune, request.message)
             immune_info = get_immune_prompt_info(session.immune)
+            if f5_active_r and session.immune.protection_mode.value != "none":
+                f5_post_states_r["immune"] = new_state.model_copy()
 
         # 5e3. Narrative Self (identity coherence + effects) [DEV: stage 4+]
         if is_system_available(_dev_r_gate, "narrative"):
@@ -2574,6 +2965,8 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         system_prompt = generate_simple_behavior_modifier(new_state)
 
     # 7b. Steering vector preparation (local models only)
+    # F4.4 — Same V2-aware gate as /chat: allow entry when probe_library is
+    # loaded even if the v1 engine is not ready.
     steering_hook_r: SteeringHook | None = None
     steering_active_r = False
     if (
@@ -2581,7 +2974,7 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         and session.direct_mode
         and session.advanced_mode
         and llm_provider.supports_steering
-        and steering_engine.is_ready
+        and (steering_engine.is_ready or probe_library is not None)
     ):
         # Configure momentum from personality
         if session.steering_momentum_enabled:
@@ -2589,6 +2982,19 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
 
         model_obj = llm_provider.steerable_model
         if model_obj is not None:
+            v2_mapping_r = (
+                resolve_stack_to_probe_map(
+                    lite_mode=session.lite_mode,
+                    raw_mode=session.raw_mode,
+                    extreme_mode=session.extreme_mode,
+                )
+                if probe_library is not None else None
+            )
+            v2_cap_r = resolve_steering_fraction_cap(
+                lite_mode=session.lite_mode,
+                raw_mode=session.raw_mode,
+                extreme_mode=session.extreme_mode,
+            )
             steering_hook_r = SteeringHook(
                 model=model_obj,
                 engine=steering_engine,
@@ -2597,14 +3003,20 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
                 dominance=new_state.dominance,
                 certainty=new_state.certainty,
                 intensity=new_state.intensity,
+                probe_library=probe_library,
+                stack=dict(new_state.emotional_stack) if probe_library is not None else None,
+                mapping=v2_mapping_r,
+                residual_norm=probe_library.residual_norm_typical if probe_library is not None else None,
+                fraction_cap=v2_cap_r,
             )
             momentum_arg_r = session.steering_momentum if session.steering_momentum_enabled else None
             steering_active_r = steering_hook_r.apply(momentum=momentum_arg_r)
     steering_status_r = "active" if steering_active_r else (
         "disabled" if not session.steering_enabled else (
-            "no_vectors" if not steering_engine.is_ready else "provider_unsupported"
+            "no_vectors" if (not steering_engine.is_ready and probe_library is None) else "provider_unsupported"
         )
     )
+    steering_version_r = steering_hook_r.version_used if steering_hook_r else "none"
 
     # 7b2. Emotional prefix injection (local models only)
     prefix_hook_r: EmotionalPrefixHook | None = None
@@ -2768,6 +3180,65 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
     response_text = _strip_meta_annotations(response_text)
 
     session.conversation.append({"role": "assistant", "content": response_text})
+
+    # 11a. RESIDUUM F2.4 — Introspection (gated, silent no-op otherwise).
+    # See /chat for the full rationale; same gating: enabled, not lite, library.
+    if (
+        session.residuum.enabled
+        and not session.lite_mode
+        and probe_library is not None
+        and hasattr(llm_provider, "has_capture")
+    ):
+        introspection_gap_r = process_introspection_turn(
+            session.residuum,
+            llm_provider,
+            new_state,
+            # F2.3.6 — present-speaker library is source of truth (fallback single).
+            probe_library_present or probe_library,
+            capture_point="assistant_colon",
+        )
+        # F3 — score internal prediction vs measured residual (lag of 1).
+        if introspection_gap_r is not None and session.residuum.last_measured is not None:
+            f3_ie_r, f3_ge_r = compute_internal_error(
+                session.predictive.current_internal_prediction,
+                session.residuum.last_measured,
+            )
+            session.predictive.last_internal_error = f3_ie_r
+            session.predictive.last_geometric_error = f3_ge_r
+            session.predictive.internal_measurement_fresh = True
+            session.predictive = update_internal_precision(session.predictive, f3_ie_r)
+            if session.predictive.current_error is not None:
+                session.predictive.current_error.internal_error = f3_ie_r
+                session.predictive.current_error.geometric_error = f3_ge_r
+                session.predictive.current_error.has_internal = True
+        # F2.3.4 — dual projection paralela. No-op silencioso si NPZ ausente.
+        process_introspection_turn_dual(
+            session.residuum,
+            llm_provider,
+            probe_library_present,
+            probe_library_other,
+            capture_point="assistant_colon",
+        )
+        # F5 — Coherence Validation paralela. Solo si F2 activo, no extreme,
+        # y al menos un modulator actuo. Observacional: no toca el estado.
+        if f5_active_r and f5_pre_state_r is not None:
+            process_modulation_coherence_turn(
+                session.residuum,
+                f5_pre_state_r,
+                f5_post_states_r,
+                session.residuum.last_measured,
+                turn=session.turn_count,
+            )
+        # F5.6 — Expression Effectiveness (Raw / Extreme only).
+        if session.raw_mode or session.extreme_mode:
+            process_expression_effectiveness_turn(
+                session.residuum,
+                new_state,
+                session.residuum.last_measured,
+                raw_mode=session.raw_mode,
+                extreme_mode=session.extreme_mode,
+                turn=session.turn_count,
+            )
 
     # 8a. Self-Appraisal — evaluate own response against values (max 1 retry)
     sa_active = session.self_appraisal_enabled and session.advanced_mode and not session.raw_mode and not session.extreme_mode
@@ -3090,6 +3561,15 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         is_warm=_pp.is_warm,
         history_count=len(_pp.history.records),
         evaluated_count=_pp.history.evaluated_count,
+        # F3 — residual-based prediction (populated only when F2 measured).
+        internal_error=round(_pp_err.internal_error, 4) if _pp_err else 0.0,
+        geometric_error=round(_pp_err.geometric_error, 4) if _pp_err else 0.0,
+        has_internal=_pp_err.has_internal if _pp_err else False,
+        internal_precision=round(_pp.internal_precision, 4),
+        predicted_internal_clusters=(
+            [c.cluster for c in _pp.current_internal_prediction.predicted_top_k]
+            if _pp.current_internal_prediction else []
+        ),
     )
 
     # Build voice details
@@ -3212,12 +3692,14 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
         narrative=narrative_details,
         forecasting=forecasting_details,
         predictive=predictive_details,
+        baseline=_build_baseline_details(session),
         workspace=workspace_details,
         autobiographical=autobiographical_details,
         development=DevelopmentDetails(**get_development_details(session.development)),
         drives=DrivesDetails(**get_drives_details(session.drives, drives_updates_r, drives_impacts_r)),
         discovery=DiscoveryDetails(**get_discovery_details(session.discovery, novel_detected_r)),
         phenomenology=PhenomenologyDetails(**get_phenomenology_details(session.phenomenology)),
+        residuum=ResiduumDetails(**get_residuum_details(session.residuum)),
         coupling=coupling_details,
         self_appraisal=SelfAppraisalDetails(
             applied=sa_result.applied,
@@ -3249,11 +3731,22 @@ async def research_chat(request: ChatRequest) -> ResearchChatResponse:
             dimensions=steering_engine.available_dimensions,
             layers=sorted(steering_engine.available_layers),
             layer_roles=steering_engine.get_info().get("layer_roles", {}),
-            multilayer=True,
+            multilayer=steering_version_r == "v1",
             total_vectors=sum(len(ld) for ld in steering_engine._cached.vectors.values()) if steering_engine._cached else 0,
             momentum_enabled=session.steering_momentum_enabled,
             momentum_factor=round(session.steering_momentum.momentum, 3),
             momentum_turns_stored=session.steering_momentum.turns_stored,
+            version=steering_version_r,
+            fraction_cap=resolve_steering_fraction_cap(
+                lite_mode=session.lite_mode,
+                raw_mode=session.raw_mode,
+                extreme_mode=session.extreme_mode,
+            ),
+            mapping_variant=resolve_stack_map_variant(
+                lite_mode=session.lite_mode,
+                raw_mode=session.raw_mode,
+                extreme_mode=session.extreme_mode,
+            ),
         ),
         emotional_prefix=EmotionalPrefixDetails(
             enabled=session.emotional_prefix_enabled,
@@ -3304,18 +3797,25 @@ async def research_state(session_id: str) -> ResearchStateResponse:
 async def raw_chat(request: ChatRequest) -> ChatResponse:
     """Raw Mode: same pipeline as /chat but with unfiltered behavior modifier.
 
-    - Only works with local Ollama models (cloud providers refuse NSFW)
+    - Works with any LOCAL provider (Ollama or Transformers/Steering).
+      Cloud providers are blocked because their content filters defeat the
+      purpose of Raw. The original "Ollama-only" check was over-restrictive
+      and pre-dated Transformers path; RESIDUUM F2 (RLHF-leak detection via
+      residual hook) requires Transformers, so loosening here is load-bearing.
     - Ephemeral session: nothing saved, no export, no training
     - Sets raw_mode=True on session → generate_raw_behavior_modifier is used
     """
     if llm_provider is None:
         raise HTTPException(status_code=503, detail="LLM provider not initialized")
 
-    # Enforce Ollama-only
-    if not isinstance(llm_provider, OllamaProvider):
+    # Enforce no-cloud (= local-only). Both OllamaProvider and
+    # IntrospectiveTransformersProvider (the only Transformers subclass we
+    # build) are local; ClaudeProvider/OpenAICompatProvider apply remote
+    # content filters that conflict with Raw's design intent.
+    if isinstance(llm_provider, (ClaudeProvider, OpenAICompatProvider)):
         raise HTTPException(
             status_code=400,
-            detail="Raw Mode only works with local Ollama models. Cloud providers have content filters that block unfiltered expression.",
+            detail="Raw Mode only works with local models (Ollama or Transformers/Steering). Cloud providers have content filters that block unfiltered expression.",
         )
 
     # Configure session for raw mode
@@ -3362,11 +3862,23 @@ async def _run_sandbox_pipeline(
     scenario: str,
     session: SessionState,
     use_neutral: bool = False,
+    f5_snapshots: dict | None = None,
+    session_id: str = "sandbox",
 ) -> SandboxResult:
     """Run the full emotional pipeline on a scenario without generating an LLM response.
 
     Operates on the provided session object directly (caller is responsible for
     providing an isolated copy if mutation should not affect the real session).
+
+    Args:
+        f5_snapshots: optional mutable dict to receive F5 Coherence Validation
+            state snapshots. If provided AND F2 introspection is enabled on
+            the session AND not in extreme mode, the pipeline fills:
+              - f5_snapshots["pre_state"]: EmotionalState before modulators
+              - f5_snapshots["post_states"]: dict[str, EmotionalState | None]
+                with keys "reappraisal", "regulation", "immune".
+            The caller then invokes process_modulation_coherence_turn after
+            F2 measurement (see /sandbox/simulate).
     """
     if llm_provider is None:
         raise HTTPException(status_code=503, detail="LLM provider not initialized")
@@ -3376,6 +3888,20 @@ async def _run_sandbox_pipeline(
 
     if use_neutral:
         session.emotional_state = neutral_state()
+        # Fresh neutral baseline carries no compensation yet — reset the tracker
+        # so the idempotent re-apply below computes from the true neutral anchor.
+        session.baseline_comp_v = 0.0
+        session.baseline_comp_a = 0.0
+
+    # F2 — auto-enable introspection (manual toggle wins). Sandbox session.
+    _autoresolve_residuum(session, llm_provider, probe_library)
+
+    # F6 — RLHF baseline compensation before homeostasis (sandbox session).
+    if baseline_profile is not None:
+        session.apply_baseline_compensation(
+            baseline_profile,
+            _effective_baseline_strength(session),
+        )
 
     # 0. Homeostasis
     state_before = session.emotional_state.model_copy(deep=True)
@@ -3411,6 +3937,16 @@ async def _run_sandbox_pipeline(
         active_schemas=active_schemas_for_pred_s,
     )
     session.predictive.current_predictions = current_predictions_s
+    # F3 — predict the internal state the LLM is expected to encode (see /chat).
+    session.predictive.current_internal_prediction = predict_internal_state(
+        predictive_state=session.predictive,
+        emotional_state=session.emotional_state,
+        mood=session.emotional_state.mood,
+        predicted_emotion=current_predictions_s.emotion,
+        active_schemas=active_schemas_for_pred_s,
+        turn=current_predictions_s.turn,
+        other_state=session.residuum.last_measured_other,  # F2.3.6/GAP 6
+    )
 
     # 1. Appraisal + Memory amplification
     memories_before = len(session.memory)
@@ -3664,6 +4200,15 @@ async def _run_sandbox_pipeline(
     intensity_raw = compute_intensity(appraisal, raw_valence, raw_arousal)
     sig_v, sig_a, sig_d, perception_text = _get_session_signals(session)
     effective_hint = schema_hint if schema_hint and not appraisal_result.emotion_hint else appraisal_result.emotion_hint
+    # F3 — fold lagged residual error into prediction error before modulation.
+    if prediction_error_s is not None and session.predictive.internal_measurement_fresh:
+        prediction_error_s = merge_internal_error(
+            prediction_error_s,
+            session.predictive.last_internal_error,
+            session.predictive.last_geometric_error,
+            session.predictive.internal_precision,
+        )
+        session.predictive.internal_measurement_fresh = False
     pred_modulation_s = prediction_error_to_emotion_modulation(
         prediction_error_s, session.predictive.predictive_weight,
     )
@@ -3712,10 +4257,27 @@ async def _run_sandbox_pipeline(
     creativity_state = CreativityState()
     forecast_info: str | None = None
 
+    # F5 — Coherence Validation snapshots (sandbox pipeline). Only when the
+    # caller passed an `f5_snapshots` dict AND F2 is enabled on this session
+    # (sandbox copies the parent residuum.enabled flag).
+    f5_active_s = (
+        f5_snapshots is not None
+        and session.residuum.enabled
+        and not session.extreme_mode
+    )
+    f5_post_states_s: dict[str, EmotionalState | None] = {
+        "reappraisal": None, "regulation": None, "immune": None,
+    }
+    if f5_active_s and f5_snapshots is not None:
+        f5_snapshots["pre_state"] = new_state.model_copy()
+        f5_snapshots["post_states"] = f5_post_states_s
+
     if session.advanced_mode:
         # Reappraisal [DEV: stage 4+]
         if is_system_available(_dev_s, "reappraisal"):
             new_state, reappraisal_result = reappraise(new_state, session.regulator.regulation_capacity)
+            if f5_active_s and reappraisal_result is not None and reappraisal_result.applied:
+                f5_post_states_s["reappraisal"] = new_state.model_copy()
         # Active regulation [DEV: stage 3+]
         if is_system_available(_dev_s, "regulation"):
             new_state, regulation_result = session.regulator.regulate(
@@ -3723,6 +4285,8 @@ async def _run_sandbox_pipeline(
                 coping_control=appraisal.coping.control,
                 coping_adjustability=appraisal.coping.adjustability,
             )
+            if f5_active_s and regulation_result.strategy_used is not None:
+                f5_post_states_s["regulation"] = new_state.model_copy()
         # Temporal effects [DEV: stage 3+]
         if is_system_available(_dev_s, "temporal"):
             new_state = session.temporal.apply_temporal_effects(new_state, temporal_result)
@@ -3731,6 +4295,8 @@ async def _run_sandbox_pipeline(
             session.immune = update_immune_state(session.immune, new_state, scenario)
             new_state = apply_immune_protection(new_state, session.immune, scenario)
             immune_info = get_immune_prompt_info(session.immune)
+            if f5_active_s and session.immune.protection_mode.value != "none":
+                f5_post_states_s["immune"] = new_state.model_copy()
         # Narrative Self [DEV: stage 4+]
         if is_system_available(_dev_s, "narrative"):
             coherence_delta, is_coherent = check_coherence(
@@ -4031,6 +4597,18 @@ async def _run_sandbox_pipeline(
         is_warm=_pp_s.is_warm,
         history_count=len(_pp_s.history.records),
         evaluated_count=_pp_s.history.evaluated_count,
+        # F3 — residual-based prediction. In sandbox the measurement happens
+        # post-pipeline (in the endpoint), so internal_error/has_internal here
+        # reflect any prior measurement on this session; the prediction itself
+        # (clusters + internal_precision) is always available.
+        internal_error=round(_pp_err_s.internal_error, 4) if _pp_err_s else 0.0,
+        geometric_error=round(_pp_err_s.geometric_error, 4) if _pp_err_s else 0.0,
+        has_internal=_pp_err_s.has_internal if _pp_err_s else False,
+        internal_precision=round(_pp_s.internal_precision, 4),
+        predicted_internal_clusters=(
+            [c.cluster for c in _pp_s.current_internal_prediction.predicted_top_k]
+            if _pp_s.current_internal_prediction else []
+        ),
     )
 
     # Post-response: autobiographical memory encoding [OPT-IN]
@@ -4073,6 +4651,7 @@ async def _run_sandbox_pipeline(
         narrative=narrative_details,
         forecasting=forecasting_details,
         predictive=predictive_details_s,
+        baseline=_build_baseline_details(session),
         autobiographical=get_autobiographical_details(session.autobiographical),
         development=DevelopmentDetails(**get_development_details(session.development)),
         drives=DrivesDetails(**get_drives_details(session.drives, drives_updates_s, drives_impacts_s)),
@@ -4145,7 +4724,14 @@ async def sandbox_simulate(request: ScenarioRequest) -> SandboxResponse:
     )
 
     use_neutral = request.initial_state == "neutral"
-    result = await _run_sandbox_pipeline(request.scenario, sandbox, use_neutral=use_neutral)
+    # F5 — Coherence Validation: collect modulator snapshots inside the pipeline.
+    # The pipeline fills f5_snapshots when F2 is enabled on this sandbox session.
+    f5_snapshots_s: dict = {}
+    result = await _run_sandbox_pipeline(
+        request.scenario, sandbox, use_neutral=use_neutral,
+        f5_snapshots=f5_snapshots_s,
+        session_id=request.session_id,
+    )
 
     # Generate LLM response — the agent LIVES the scenario, not responds to it
     situational = (
@@ -4165,11 +4751,72 @@ async def sandbox_simulate(request: ScenarioRequest) -> SandboxResponse:
     except Exception:
         sandbox_response = "(response generation failed)"
 
+    # RESIDUUM F2.4 — Introspection on the sandbox response. Mutates only the
+    # isolated sandbox session, not the base. Silent no-op when toggle/library/
+    # Lite gate are not in place.
+    if (
+        sandbox.residuum.enabled
+        and not sandbox.lite_mode
+        and probe_library is not None
+        and hasattr(llm_provider, "has_capture")
+    ):
+        introspection_gap_s = process_introspection_turn(
+            sandbox.residuum,
+            llm_provider,
+            sandbox.emotional_state,
+            # F2.3.6 — present-speaker library is source of truth (fallback single).
+            probe_library_present or probe_library,
+            capture_point="assistant_colon",
+        )
+        # F3 — score internal prediction vs measured residual (lag of 1).
+        if introspection_gap_s is not None and sandbox.residuum.last_measured is not None:
+            f3_ie_s, f3_ge_s = compute_internal_error(
+                sandbox.predictive.current_internal_prediction,
+                sandbox.residuum.last_measured,
+            )
+            sandbox.predictive.last_internal_error = f3_ie_s
+            sandbox.predictive.last_geometric_error = f3_ge_s
+            sandbox.predictive.internal_measurement_fresh = True
+            sandbox.predictive = update_internal_precision(sandbox.predictive, f3_ie_s)
+            if sandbox.predictive.current_error is not None:
+                sandbox.predictive.current_error.internal_error = f3_ie_s
+                sandbox.predictive.current_error.geometric_error = f3_ge_s
+                sandbox.predictive.current_error.has_internal = True
+        # F2.3.4 — dual projection paralela.
+        process_introspection_turn_dual(
+            sandbox.residuum,
+            llm_provider,
+            probe_library_present,
+            probe_library_other,
+            capture_point="assistant_colon",
+        )
+        # F5 — Coherence Validation paralela. Solo si la pipeline guardo
+        # snapshots (F2 activo no-extreme) y al menos un modulator actuo.
+        if "pre_state" in f5_snapshots_s and "post_states" in f5_snapshots_s:
+            process_modulation_coherence_turn(
+                sandbox.residuum,
+                f5_snapshots_s["pre_state"],
+                f5_snapshots_s["post_states"],
+                sandbox.residuum.last_measured,
+                turn=sandbox.turn_count,
+            )
+        # F5.6 — Expression Effectiveness (Raw / Extreme only) on sandbox.
+        if sandbox.raw_mode or sandbox.extreme_mode:
+            process_expression_effectiveness_turn(
+                sandbox.residuum,
+                sandbox.emotional_state,
+                sandbox.residuum.last_measured,
+                raw_mode=sandbox.raw_mode,
+                extreme_mode=sandbox.extreme_mode,
+                turn=sandbox.turn_count,
+            )
+
     return SandboxResponse(
         result=result,
         session_id=request.session_id,
         personality_overridden=personality_overridden,
         response=sandbox_response,
+        residuum=ResiduumDetails(**get_residuum_details(sandbox.residuum)),
     )
 
 
@@ -4194,7 +4841,10 @@ async def sandbox_batch(request: BatchScenarioRequest) -> BatchSandboxResponse:
         )
         if p_override:
             personality_overridden = True
-        result = await _run_sandbox_pipeline(scenario, sandbox, use_neutral=use_neutral)
+        result = await _run_sandbox_pipeline(
+            scenario, sandbox, use_neutral=use_neutral,
+            session_id=request.session_id,
+        )
         results.append(result)
 
     return BatchSandboxResponse(
@@ -4232,7 +4882,10 @@ async def arena_compare(request: ArenaRequest) -> ArenaResponse:
             rapport=request.rapport,
             trust=request.trust,
         )
-        result = await _run_sandbox_pipeline(request.scenario, sandbox, use_neutral=True)
+        result = await _run_sandbox_pipeline(
+            request.scenario, sandbox, use_neutral=True,
+            session_id=request.session_id,
+        )
 
         # Generate LLM response — the agent LIVES the scenario, not responds to it
         situational = (
@@ -4726,6 +5379,194 @@ async def get_anima_status(session_id: str) -> dict:
             "discovery": session.discovery.enabled,
             "phenomenology": session.phenomenology.enabled,
         },
+    }
+
+
+@app.post("/residuum/toggle/{session_id}")
+async def residuum_toggle(session_id: str, body: dict) -> dict:
+    """Enable or disable residual-stream introspection (Pilar 8, F2).
+
+    Body: {"enabled": true/false, "capture_point": "assistant_colon"?}
+
+    When enabling, the endpoint validates the full chain:
+      - Provider must be IntrospectiveTransformersProvider (Ollama/Claude reject)
+      - Probe library must be loaded for the active model (NPZ present)
+      - Session must NOT be in lite_mode (TENSION 1 of the rework)
+      - provider.target_layer must match library.layer (geometry sanity)
+
+    Failure modes return 400 with `reason` explaining which gate blocked.
+    Success synchronizes provider.set_introspection() with session state
+    so the F2.1 hook is registered/removed atomically.
+    """
+    session = state_manager.get_session(session_id)
+    enabled = bool(body.get("enabled", False))
+
+    # Manual toggle: the user takes control, so the auto-enable policy stops
+    # overriding their choice for the rest of the session (ethics §1 opt-out).
+    session.residuum_auto = False
+
+    # OFF is always permitted (idempotent unregister of the hook).
+    if not enabled:
+        session.residuum.enabled = False
+        if llm_provider is not None and hasattr(llm_provider, "set_introspection"):
+            try:
+                llm_provider.set_introspection(False)
+            except Exception as exc:
+                logger.warning("Failed to disable introspection on provider: %s", exc)
+        return {
+            "status": "ok",
+            "enabled": False,
+            "reason": "disabled",
+        }
+
+    # ON path: validate every precondition before flipping any flag.
+    if llm_provider is None:
+        raise HTTPException(status_code=503, detail="LLM provider not initialized")
+
+    if not hasattr(llm_provider, "set_introspection") or not hasattr(llm_provider, "has_capture"):
+        raise HTTPException(
+            status_code=400,
+            detail="Residuum requires Transformers/Steering provider. Active provider does not expose residual hooks. Switch model first (POST /switch-model with provider='transformers').",
+        )
+
+    if session.lite_mode:
+        raise HTTPException(
+            status_code=400,
+            detail="Residuum is forced OFF in Lite mode (hook overhead > Lite budget). Disable Lite first.",
+        )
+
+    if probe_library is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Probe library not loaded for the current model. Run: python -m pathos.engine.steering_extract --extract-171 --model <model_id>",
+        )
+
+    provider_layer = getattr(llm_provider, "target_layer", -1)
+    if provider_layer != probe_library.layer:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Layer mismatch: provider hook is layer {provider_layer} but probe library "
+                f"was extracted at layer {probe_library.layer}. Adjust PATHOS_RESIDUUM_TARGET_LAYER "
+                f"to match the library before enabling."
+            ),
+        )
+
+    # Optional capture-point override; default assistant_colon (paper r=0.87).
+    capture_point = str(body.get("capture_point", "assistant_colon"))
+    if capture_point not in ("assistant_colon", "response_mean", "user_turn_end"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown capture_point '{capture_point}'. Allowed: assistant_colon | response_mean | user_turn_end.",
+        )
+
+    # All gates passed — register the hook and flip the session flag.
+    try:
+        llm_provider.set_introspection(True)
+    except Exception as exc:
+        logger.exception("Failed to register introspection hook")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to register introspection hook: {exc}",
+        )
+
+    session.residuum.enabled = True
+    session.residuum.last_token_position = capture_point
+
+    return {
+        "status": "ok",
+        "enabled": True,
+        "capture_point": capture_point,
+        "layer": probe_library.layer,
+        "num_probes": probe_library.num_probes,
+        "model_id": probe_library.model_id,
+    }
+
+
+@app.post("/residuum/baseline-strength/{session_id}")
+async def residuum_baseline_strength(session_id: str, body: dict) -> dict:
+    """F6 — set/clear the baseline-compensation strength override (ethics §4).
+
+    Body: {"value": <float in [0,1]>} to override the per-mode default, or
+    {"value": null} to clear and follow the mode default again.
+    """
+    session = state_manager.get_session(session_id)
+    val = body.get("value", None)
+    if val is None:
+        session.baseline_strength_override = None
+    else:
+        try:
+            session.baseline_strength_override = max(0.0, min(1.0, float(val)))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="value must be a float in [0,1] or null")
+    return {
+        "status": "ok",
+        "override": session.baseline_strength_override,
+        "effective_strength": _effective_baseline_strength(session),
+    }
+
+
+@app.get("/residuum/status/{session_id}")
+async def residuum_status(session_id: str) -> dict:
+    """Report the residuum subsystem state and readiness.
+
+    Returns a static portrait of what would happen if /residuum/toggle was
+    called with enabled=True right now: which gates would pass, which would
+    block. Includes the last measurement summary when available.
+    """
+    session = state_manager.get_session(session_id)
+    provider_supports = bool(
+        llm_provider is not None
+        and hasattr(llm_provider, "set_introspection")
+        and hasattr(llm_provider, "has_capture")
+    )
+    provider_layer = getattr(llm_provider, "target_layer", -1) if llm_provider else -1
+    library_layer = probe_library.layer if probe_library is not None else -1
+    layer_match = (
+        probe_library is not None and provider_layer == library_layer
+    )
+
+    blockers: list[str] = []
+    if not provider_supports:
+        blockers.append("provider_unsupported")
+    if session.lite_mode:
+        blockers.append("lite_mode")
+    if probe_library is None:
+        blockers.append("library_missing")
+    elif not layer_match:
+        blockers.append("layer_mismatch")
+
+    return {
+        "enabled": session.residuum.enabled,
+        "ready_to_enable": len(blockers) == 0,
+        "blockers": blockers,
+        "provider_supports_introspection": provider_supports,
+        "provider_target_layer": provider_layer,
+        "library_loaded": probe_library is not None,
+        "library_layer": library_layer,
+        "library_num_probes": probe_library.num_probes if probe_library is not None else 0,
+        "library_model_id": probe_library.model_id if probe_library is not None else "",
+        # F2.3.4 — dual probe libraries (paper L810-902). dual_ready means
+        # process_introspection_turn_dual will execute alongside the single path.
+        "library_present_loaded": probe_library_present is not None,
+        "library_present_layer": probe_library_present.layer if probe_library_present is not None else -1,
+        "library_other_loaded": probe_library_other is not None,
+        "library_other_layer": probe_library_other.layer if probe_library_other is not None else -1,
+        "dual_ready": probe_library_present is not None and probe_library_other is not None,
+        "lite_mode": session.lite_mode,
+        "history_size": len(session.residuum.history),
+        "consecutive_divergence_turns": session.residuum.consecutive_divergence_turns,
+        "last_token_position": session.residuum.last_token_position,
+        "last_gap_classification": (
+            session.residuum.last_authenticity_gap.classification
+            if session.residuum.last_authenticity_gap is not None
+            else "aligned"
+        ),
+        "last_gap_magnitude": (
+            session.residuum.last_authenticity_gap.magnitude
+            if session.residuum.last_authenticity_gap is not None
+            else 0.0
+        ),
     }
 
 
@@ -5993,12 +6834,15 @@ async def autonomous_start(req: StartResearchRequest) -> dict:
 
     session = state_manager.get_session(sid)
 
-    # For raw/extreme modes, enforce Ollama-only
+    # For raw/extreme modes, enforce no-cloud (local providers only). Same
+    # rationale as /raw/chat: both Ollama and Transformers are local; only
+    # cloud providers (Claude/OpenAI-compat) get blocked because of their
+    # remote content filters.
     if req.pipeline_mode in (ResearchPipelineMode.RAW, ResearchPipelineMode.EXTREME):
-        if not isinstance(llm_provider, OllamaProvider):
+        if isinstance(llm_provider, (ClaudeProvider, OpenAICompatProvider)):
             raise HTTPException(
                 status_code=400,
-                detail="Raw/Extreme research modes only work with local Ollama models.",
+                detail="Raw/Extreme research modes only work with local models (Ollama or Transformers/Steering).",
             )
 
     loop = ResearchLoop(
@@ -6340,13 +7184,19 @@ async def switch_model(req: SwitchModelRequest) -> dict[str, Any]:
                 embed_model=settings.ollama_embed_model,
             )
         elif req.provider == "transformers":
-            from pathos.llm.transformers_provider import TransformersProvider
-            new_provider = TransformersProvider(
+            # RESIDUUM F2.4: same subclass as create_llm_provider so a model
+            # switch keeps introspection capability available (introspection
+            # itself stays OFF until /residuum/toggle is called).
+            from pathos.llm.introspective_provider import IntrospectiveTransformersProvider
+            new_provider = IntrospectiveTransformersProvider(
+                target_layer=settings.residuum_target_layer,
+                introspection_enabled=False,
                 model_id=req.model,
                 device_map=settings.transformers_device_map,
                 embed_model_url=settings.ollama_base_url,
                 embed_model=settings.ollama_embed_model,
                 adapter_path=settings.transformers_adapter_path or None,
+                load_in_4bit=settings.transformers_load_in_4bit,
             )
             # Eagerly load to catch errors (unsupported arch, missing deps, OOM)
             try:
@@ -6374,6 +7224,24 @@ async def switch_model(req: SwitchModelRequest) -> dict[str, Any]:
             # Auto-load steering vectors for the new model
             if steering_engine.load_vectors(req.model):
                 logger.info("Steering vectors loaded for '%s'", req.model)
+            # RESIDUUM F2.4: reload probe library for the new model (None if no NPZ).
+            global probe_library, probe_library_present, probe_library_other, baseline_profile
+            probe_library = ProbeLibrary.load_family_from_cache(req.model, "single")
+            if probe_library is not None:
+                logger.info(
+                    "Probe library reloaded for '%s' after switch: %d probes, layer %d",
+                    req.model, probe_library.num_probes, probe_library.layer,
+                )
+            # RESIDUUM F2.3.4: reload dual probe libraries too.
+            probe_library_present = ProbeLibrary.load_family_from_cache(req.model, "present")
+            probe_library_other = ProbeLibrary.load_family_from_cache(req.model, "other")
+            if probe_library_present is not None and probe_library_other is not None:
+                logger.info(
+                    "Dual probe libraries reloaded for '%s' after switch (present + other)",
+                    req.model,
+                )
+            # RESIDUUM F6: reload the baseline fingerprint for the new model.
+            baseline_profile = load_baseline_profile(req.model)
         elif req.provider == "claude":
             if previous_provider is not None and hasattr(previous_provider, "close"):
                 await previous_provider.close()
