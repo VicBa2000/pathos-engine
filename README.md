@@ -73,7 +73,7 @@ This is not sentiment analysis. This is not prompt engineering. This is a comput
 
 ---
 
-## The 35 Emotional Systems
+## The 48 Emotional Systems
 
 Every system runs on every message in advanced mode. Each is independently testable, observable through the Research Panel, and documented.
 
@@ -450,7 +450,7 @@ Voice is **completely optional** — the system works perfectly in text-only mod
 | **Emotion Network** | D3.js force-directed graph of emotion transitions across conversation |
 | **Circumplex Chart** | Real-time position on Russell's valence-arousal circumplex |
 | **Body State** | Energy, tension, openness, warmth as visual indicators |
-| **Pipeline Viewer** | Step-by-step view of all 36 pipeline steps with timing |
+| **Pipeline Viewer** | Step-by-step view of all 42+ pipeline steps with timing |
 | **Journey Timeline** | Full emotional trajectory across the conversation |
 | **Research Panel** | 23+ sections exposing every internal system including ANIMA pillars (Research mode) |
 | **Signals Config** | External signal panel: webcam facial AU detection, keyboard dynamics, time/weather |
@@ -519,7 +519,7 @@ cd frontend && npx tsc --noEmit
 cd frontend && npx vite build
 ```
 
-1358 tests covering:
+2478 tests covering:
 - Emotion generation (ranges, identification, inertia)
 - Appraisal parsing (JSON extraction, clamping)
 - Homeostasis (decay, baseline shift, sensitization)
@@ -595,7 +595,7 @@ pathos/
     types/emotion.ts           # TypeScript types matching backend schemas
     signals/                   # External signal detectors (facial-detector.ts, providers.ts)
     lib/                       # Shared utilities (perlin, colorUtils, faceParams)
-  tests/                       # 1358 unit tests (43 test files)
+  tests/                       # 2478 unit tests (74 test files)
 ```
 
 ---
