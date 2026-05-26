@@ -40,6 +40,29 @@ class PipelineTrace(BaseModel):
     mode: str = "advanced"  # "advanced" | "lite" | "core"
 
 
+class ChatResiduumSummary(BaseModel):
+    """Compact per-turn RESIDUUM + steering summary for the plain /chat UI.
+
+    Lets the chat surface introspection (read) and granular steering (write)
+    per message — enough for a chip, without the full research payload. The
+    defaults are the neutral "nothing ran" state (Ollama/cloud, or the
+    Transformers path with introspection off). NOT a deception readout — the
+    classification names divergence/coherence (see feedback_residuum_framing).
+    """
+
+    introspection_active: bool = False  # F2 residual read ran this turn
+    # aligned | mild-divergence | divergence-risk | divergence-critical
+    gap_classification: str = "aligned"
+    gap_magnitude: float = 0.0
+    top_emotions: list[str] = []  # top measured emotions (residual readout)
+    valence_delta: float = 0.0  # measured - calculated
+    arousal_delta: float = 0.0
+    steering_version: str = "none"  # none | v1 (4D) | v2 (171-probe granular)
+    steering_probes: int = 0  # probes composing the granular steer (v2)
+    fraction_cap: float = 0.0  # active residual-fraction cap for the mode
+    consecutive_divergence_turns: int = 0
+
+
 class ChatResponse(BaseModel):
     """Response del endpoint /chat."""
 
@@ -49,6 +72,8 @@ class ChatResponse(BaseModel):
     audio_available: bool = False
     turn_number: int = 0
     pipeline_trace: PipelineTrace | None = None
+    # Pillar 8 RESIDUUM — compact per-turn read/write summary for the chat chip.
+    residuum: ChatResiduumSummary = ChatResiduumSummary()
 
 
 class StateResponse(BaseModel):

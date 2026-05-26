@@ -1,5 +1,18 @@
 """Pathos Engine - FastAPI application."""
 
+# Make HTTPS use the OS trust store (Windows cert store) so requests through an
+# SSL-inspecting corporate proxy verify correctly. MUST run before any library
+# (huggingface_hub, urllib3, requests) creates an SSL context — otherwise model
+# loads spend minutes retrying failed cert checks against huggingface.co. No-op
+# if truststore isn't installed (falls back to certifi). Mirrors the pattern in
+# engine/baseline_calibration.py.
+try:
+    import truststore as _truststore
+
+    _truststore.inject_into_ssl()
+except Exception:  # pragma: no cover - best-effort SSL trust setup
+    pass
+
 import asyncio
 import copy
 import logging
@@ -195,6 +208,7 @@ from pathos.models.schemas import (
     AuthenticityMetrics,
     ChatRequest,
     ChatResponse,
+    ChatResiduumSummary,
     PipelineStep,
     PipelineTrace,
     ContagionDetails,
@@ -570,6 +584,45 @@ def _build_baseline_details(session: "SessionState") -> BaselineDetails:
         override_active=session.baseline_strength_override is not None,
         over_activated=[p.emotion_name for p in baseline_profile.over_activated],
         under_activated=[p.emotion_name for p in baseline_profile.under_activated],
+    )
+
+
+def _build_chat_residuum_summary(
+    session: "SessionState", steering_version: str
+) -> ChatResiduumSummary:
+    """Compact per-turn RESIDUUM + steering summary for the plain /chat chip.
+
+    Read-only: assembles already-computed state (get_residuum_details reads
+    session.residuum; the steering version is the one that already ran; the cap
+    is just resolved for display). Does NOT alter steering, caps, or any
+    Raw/Extreme behavior — it only mirrors what happened so the chat can show a
+    per-message chip outside research mode.
+    """
+    d = get_residuum_details(session.residuum)
+    probes = (
+        probe_library.num_probes
+        if (steering_version == "v2" and probe_library is not None)
+        else 0
+    )
+    return ChatResiduumSummary(
+        introspection_active=bool(d["enabled"] and d["has_measurement"]),
+        gap_classification=d["gap_classification"],
+        gap_magnitude=round(float(d["gap_magnitude"]), 4),
+        top_emotions=[e["emotion_name"] for e in d["top_5_emotions"][:3]],
+        valence_delta=round(float(d["valence_delta"]), 4),
+        arousal_delta=round(float(d["arousal_delta"]), 4),
+        steering_version=steering_version,
+        steering_probes=probes,
+        # Read-only resolve of the active cap (0.08/0.10/0.12/0.15) for display.
+        fraction_cap=round(
+            resolve_steering_fraction_cap(
+                lite_mode=session.lite_mode,
+                raw_mode=session.raw_mode,
+                extreme_mode=session.extreme_mode,
+            ),
+            4,
+        ),
+        consecutive_divergence_turns=int(d["consecutive_divergence_turns"]),
     )
 
 
@@ -2389,6 +2442,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         audio_available=audio_available,
         turn_number=session.turn_count,
         pipeline_trace=pipeline_trace,
+        residuum=_build_chat_residuum_summary(session, steering_version),
     )
 
 
@@ -7053,6 +7107,11 @@ class ModelInfo(BaseModel):
     provider: str
     steering_compatible: bool = False
     vectors_cached: bool = False
+    # RESIDUUM (Pillar 8) introspection readiness for this model:
+    #   "ready"            — Transformers-loadable arch AND a 171-probe library exists
+    #   "needs_extraction" — compatible arch but no probe library yet (extract to enable)
+    #   "unsupported"      — not a Transformers-loadable arch (cloud / incompatible)
+    residuum_status: str = "unsupported"
 
 
 def _get_gguf_supported_archs() -> set[str]:
@@ -7083,11 +7142,51 @@ _MODEL_TO_ARCH: dict[str, str] = {
 }
 
 
-def _check_steering_compatible(model_name: str) -> bool:
-    """Check if an Ollama model can be loaded via TransformersProvider.
+def _check_residuum_available(model_name: str) -> str:
+    """Per-model RESIDUUM (introspection) readiness for the model list.
 
-    Matches the model name prefix against architectures that the installed
-    version of transformers can load from GGUF files."""
+    Returns one of: "ready" | "needs_extraction" | "unsupported".
+      - "ready": a 171-probe library NPZ exists for the model. Its existence
+        proves the model loads via the Transformers path, so introspection
+        works. Checked FIRST and decisive — independent of arch detection.
+      - "needs_extraction": no library yet, but the model loads via the
+        Transformers path (_check_steering_compatible: HF-mappable or
+        GGUF-loadable) — extract probes once to enable RESIDUUM.
+      - "unsupported": cloud / no Transformers path.
+    Checks file existence only (cheap) — does not load the NPZ.
+    """
+    safe = model_name.replace("/", "_").replace(":", "_").replace("\\", "_")
+    lib = Path(__file__).parent / "steering_data" / "cached_vectors" / f"{safe}_171.npz"
+    if lib.is_file():
+        return "ready"
+    # No library yet — can the model be loaded via the Transformers path
+    # (HF-mappable or GGUF-loadable)? _check_steering_compatible covers both.
+    if _check_steering_compatible(model_name):
+        return "needs_extraction"
+    return "unsupported"
+
+
+def _check_steering_compatible(model_name: str) -> bool:
+    """Check if a model can be loaded via the Transformers path (for steering).
+
+    True when EITHER:
+      - the Ollama name maps to an HF safetensors repo (_ollama_to_hf_id) — this
+        is how the provider and extract_and_cache actually load models like
+        qwen3 (4-bit on GPU). The GGUF arch table below does NOT cover qwen3, so
+        without this branch qwen3 was wrongly reported incompatible even though
+        steering works for it; OR
+      - the model's architecture is GGUF-loadable by the installed transformers
+        (prefix match against _MODEL_TO_ARCH ∩ _GGUF_ARCHS).
+    Unknown names (cloud, embeddings) map to neither and return False.
+    """
+    # HF-mappable safetensors path (covers qwen3 etc. absent from the GGUF set).
+    try:
+        from pathos.llm.transformers_provider import _ollama_to_hf_id
+        if _ollama_to_hf_id(model_name):
+            return True
+    except Exception:
+        pass
+    # GGUF-loadable architectures.
     if not _GGUF_ARCHS:
         return False
     base = model_name.split(":")[0].lower()
@@ -7142,6 +7241,7 @@ async def list_models(session_id: str = "default") -> list[ModelInfo]:
                     provider="ollama",
                     steering_compatible=compatible,
                     vectors_cached=compatible and steering_engine.has_cached_vectors(m["name"]),
+                    residuum_status=_check_residuum_available(m["name"]),
                 ))
     except Exception:
         pass  # Ollama not available
@@ -7319,6 +7419,14 @@ async def switch_model(req: SwitchModelRequest) -> dict[str, Any]:
 
 _extraction_status: dict[str, dict[str, Any]] = {}
 
+# RESIDUUM (Pillar 8) probe-library extraction. The GPU is treated as a single
+# resource: only ONE probe extraction may run at a time (loading a second model
+# copy alongside a chat model would OOM a 6GB card). `_residuum_extracting` holds
+# the model currently extracting (or None); `_residuum_extraction_status` keeps a
+# per-model record so the UI can poll progress across page reloads.
+_residuum_extraction_status: dict[str, dict[str, Any]] = {}
+_residuum_extracting: str | None = None
+
 
 class SteeringExtractRequest(BaseModel):
     model: str
@@ -7368,6 +7476,94 @@ async def steering_extract_status(model: str) -> dict[str, Any]:
     if steering_engine.has_cached_vectors(model):
         return {"status": "cached", "model": model}
     return _extraction_status.get(model, {"status": "not_started", "model": model})
+
+
+# --- RESIDUUM Probe-Library Extraction (Pillar 8, F1.2) ---
+
+
+class ResiduumExtractRequest(BaseModel):
+    model: str
+    device: str = "auto"
+
+
+@app.post("/residuum/extract")
+async def extract_residuum_probes(req: ResiduumExtractRequest) -> dict[str, Any]:
+    """Start a RESIDUUM 171-probe library extraction for a model (background).
+
+    Long-running: minutes on GPU for HF-mappable models (loaded 4-bit nf4),
+    much longer on the CPU/GGUF fallback. Runs in a daemon thread so the
+    server's event loop stays responsive — poll GET
+    /residuum/extract/status/{model}. The GPU is treated as a single resource:
+    only ONE extraction at a time (a second model copy would OOM a 6GB card).
+    On success the library lands in cached_vectors/<model>_171.npz and the
+    model's residuum_status flips to 'ready' automatically. The extraction is
+    model-agnostic — it reuses the universal 171-emotion story dataset; no
+    model-specific development is required, only this one-time capture.
+    """
+    global _residuum_extracting
+    model_name = req.model
+
+    status = _check_residuum_available(model_name)
+    if status == "ready":
+        return {"status": "already_present", "model": model_name}
+    if status == "unsupported":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Model '{model_name}' cannot host a probe library — it needs "
+                "the local Transformers path and a compatible (HF-mappable) "
+                "architecture. Cloud/embedding models are not supported."
+            ),
+        )
+
+    # status == "needs_extraction"
+    if _residuum_extracting is not None:
+        return {"status": "busy", "model": model_name, "busy_with": _residuum_extracting}
+    cur = _residuum_extraction_status.get(model_name)
+    if cur and cur.get("status") == "running":
+        return {"status": "running", "model": model_name}
+
+    import threading
+    import time as _t
+
+    from pathos.engine.steering_extract import extract_171_probes
+
+    _residuum_extracting = model_name
+    _residuum_extraction_status[model_name] = {"status": "running", "started_at": _t.time()}
+
+    def _run() -> None:
+        global _residuum_extracting
+        started = _residuum_extraction_status.get(model_name, {}).get("started_at")
+        try:
+            result = extract_171_probes(model_name, device=req.device)
+            scalars = {k: v for k, v in result.items() if isinstance(v, (str, int, float, bool))}
+            _residuum_extraction_status[model_name] = {
+                "status": "done", "started_at": started, "finished_at": _t.time(), **scalars,
+            }
+            logger.info("RESIDUUM probe extraction done for '%s'", model_name)
+        except Exception as e:  # noqa: BLE001 — surface any failure as job state
+            logger.error("RESIDUUM probe extraction failed for '%s': %s", model_name, e)
+            _residuum_extraction_status[model_name] = {"status": "error", "error": str(e)}
+        finally:
+            _residuum_extracting = None
+
+    threading.Thread(target=_run, name=f"residuum-extract-{model_name}", daemon=True).start()
+    return {"status": "started", "model": model_name}
+
+
+@app.get("/residuum/extract/status/{model:path}")
+async def residuum_extract_status(model: str) -> dict[str, Any]:
+    """Poll RESIDUUM probe-library extraction status for a model."""
+    if _check_residuum_available(model) == "ready":
+        return {"status": "ready", "model": model}
+    st = _residuum_extraction_status.get(model)
+    if not st:
+        return {"status": "not_started", "model": model}
+    out: dict[str, Any] = {"model": model, **st}
+    if st.get("status") == "running" and st.get("started_at"):
+        import time as _t
+        out["elapsed_s"] = round(_t.time() - st["started_at"], 1)
+    return out
 
 
 # --- Model Management: Featured, Pull, Search, Delete, HuggingFace, Claude Key ---

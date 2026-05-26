@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import type {
   AppMode,
   ChatMessage,
+  ChatResiduumSummary,
   EmotionalState,
   PipelineTrace,
   PrimaryEmotion,
@@ -11,6 +12,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { EmotionalStatePanel } from "./components/EmotionalStatePanel";
 import { JourneyTimeline } from "./components/JourneyTimeline";
 import { ModeSelector } from "./components/ModeSelector";
+import { ResiduumStatusBadge } from "./components/ResiduumStatusBadge";
 import { ResearchPanel } from "./components/ResearchPanel";
 import { CalibrationPanel } from "./components/CalibrationPanel";
 import { SandboxPanel } from "./components/SandboxPanel";
@@ -188,6 +190,7 @@ export default function App() {
       let state: EmotionalState;
       let audioAvailable = false;
       let turnNumber = 0;
+      let residuumSnap: ChatResiduumSummary | undefined;
 
       if (mode === "research") {
         const res = await api.sendResearchChat(message, sessionId);
@@ -196,12 +199,31 @@ export default function App() {
         setResearchData(res);
         audioAvailable = res.voice?.audio_available ?? false;
         turnNumber = res.turn_number ?? 0;
+        // Map the full research residuum/steering details to the compact chip
+        // snapshot so the chip is identical across modes.
+        const r = res.residuum;
+        const s = res.steering;
+        if (r) {
+          residuumSnap = {
+            introspection_active: !!(r.enabled && r.has_measurement),
+            gap_classification: r.gap_classification,
+            gap_magnitude: r.gap_magnitude,
+            top_emotions: (r.top_5_emotions ?? []).slice(0, 3).map(e => e.emotion_name),
+            valence_delta: r.valence_delta,
+            arousal_delta: r.arousal_delta,
+            steering_version: s?.version ?? "none",
+            steering_probes: 0, // research payload lacks probe count; chip omits it
+            fraction_cap: s?.fraction_cap ?? 0,
+            consecutive_divergence_turns: r.consecutive_divergence_turns ?? 0,
+          };
+        }
       } else {
         const res = await api.sendChat(message, sessionId);
         responseText = res.response;
         state = res.emotional_state;
         audioAvailable = res.audio_available ?? false;
         turnNumber = (res as Record<string, unknown>).turn_number as number ?? 0;
+        residuumSnap = res.residuum; // already the compact shape
         setResearchData(null);
         if (res.pipeline_trace) setPipelineTrace(res.pipeline_trace);
       }
@@ -239,6 +261,7 @@ export default function App() {
         emotional_state: state,
         audioAvailable,
         turnNumber,
+        residuum: residuumSnap,
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
@@ -359,6 +382,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <ResiduumStatusBadge sessionId={sessionId} />
       <ModeSelector
         mode={mode}
         onModeChange={setMode}

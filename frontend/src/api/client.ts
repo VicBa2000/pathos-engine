@@ -98,6 +98,8 @@ export interface ModelInfo {
   provider: string;
   steering_compatible: boolean;
   vectors_cached: boolean;
+  // RESIDUUM introspection readiness: "ready" | "needs_extraction" | "unsupported"
+  residuum_status?: string;
 }
 
 export function listModels(): Promise<ModelInfo[]> {
@@ -109,6 +111,23 @@ export function extractSteeringVectors(model: string): Promise<{ status: string;
     method: "POST",
     body: JSON.stringify({ model }),
   });
+}
+
+// RESIDUUM (Pillar 8) — kick off / poll a one-time 171-probe library extraction
+// for a model. Background job server-side; GPU is single (one at a time).
+export function extractResiduumProbes(
+  model: string,
+): Promise<{ status: string; model: string; busy_with?: string }> {
+  return request("/residuum/extract", {
+    method: "POST",
+    body: JSON.stringify({ model }),
+  });
+}
+
+export function getResiduumExtractStatus(
+  model: string,
+): Promise<{ status: string; model: string; error?: string; elapsed_s?: number }> {
+  return request(`/residuum/extract/status/${encodeURIComponent(model)}`);
 }
 
 export interface ArkSwitchInfo {

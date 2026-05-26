@@ -121,6 +121,7 @@ export interface ChatResponse {
   session_id: string;
   audio_available?: boolean;
   pipeline_trace?: PipelineTrace;
+  residuum?: ChatResiduumSummary;
 }
 
 export interface StateResponse {
@@ -585,6 +586,22 @@ export interface ResiduumProjection {
   raw_activation: number;
 }
 
+/** Compact per-turn RESIDUUM + steering summary (plain /chat response + per
+ *  message chip). Mirrors ChatResiduumSummary on the backend. Read-only
+ *  telemetry — names divergence/coherence, never "deception". */
+export interface ChatResiduumSummary {
+  introspection_active: boolean;
+  gap_classification: GapClassification;
+  gap_magnitude: number;
+  top_emotions: string[];
+  valence_delta: number;
+  arousal_delta: number;
+  steering_version: string; // "none" | "v1" (4D) | "v2" (171-probe granular)
+  steering_probes: number;
+  fraction_cap: number;
+  consecutive_divergence_turns: number;
+}
+
 // F5 — Coherence Validation (Divergence between calculated and measured
 // emotional state post-modulation). NOT "deception detection" — Pathos
 // generates and exposes emotions, does not deceive.
@@ -1003,6 +1020,7 @@ export interface ChatMessage {
   research_data?: ResearchChatResponse;
   audioAvailable?: boolean;
   turnNumber?: number;
+  residuum?: ChatResiduumSummary; // per-turn RESIDUUM snapshot for the chat chip
 }
 
 /** Emotion color mapping for UI */

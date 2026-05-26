@@ -47,6 +47,13 @@ steering = [
     "transformers>=4.48.0",
     "gguf>=0.10.0",
     "accelerate>=0.25.0",
+    # 4-bit NF4 load (bitsandbytes) so a 4B model fits a 6GB GPU. CUDA-only;
+    # the Transformers provider degrades to fp16/CPU when it is absent.
+    "bitsandbytes>=0.43.0",
+    # Verify HTTPS via the OS trust store (Windows cert store) so HuggingFace
+    # downloads succeed behind an SSL-inspecting corporate proxy. Without it,
+    # model loads stall retrying failed cert checks against huggingface.co.
+    "truststore>=0.10.0",
 ]
 
 [tool.pytest.ini_options]

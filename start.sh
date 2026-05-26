@@ -4,6 +4,11 @@ set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
+# Use the OS (Windows/macOS/Linux) trust store for TLS so package installs work
+# behind an SSL-inspecting proxy whose root CA is not in uv/pip's bundled certs.
+# Without this, `uv sync` fails with "invalid peer certificate: UnknownIssuer".
+export UV_NATIVE_TLS=1
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -189,18 +194,50 @@ if $PYTHON -c "import torch; print(f'PyTorch {torch.__version__}')" 2>/dev/null;
   TORCH_INFO=$($PYTHON -c "import torch; cuda='CUDA '+torch.version.cuda if torch.cuda.is_available() else 'CPU only'; print(f'PyTorch {torch.__version__} ({cuda})')" 2>/dev/null)
   info "$TORCH_INFO"
 else
-  warn "PyTorch not found. Installing with CUDA 12.4 (this may take a while)..."
+  warn "PyTorch not found. Installing with CUDA 12.6 (this may take a while)..."
   if $HAS_UV; then
-    uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --python .venv 2>&1 | tail -5
+    uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126 --python .venv 2>&1 | tail -5
   else
-    $PYTHON -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 -q 2>&1 | tail -5
+    $PYTHON -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126 -q 2>&1 | tail -5
   fi
   if $PYTHON -c "import torch" 2>/dev/null; then
     HAS_TORCH=true
     info "PyTorch installed"
   else
     warn "PyTorch installation failed. Voice features will be unavailable."
-    echo -e "  ${DIM}Manual install: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124${NC}"
+    echo -e "  ${DIM}Manual install: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126${NC}"
+  fi
+fi
+
+# --- RESIDUUM / Steering (direct Transformers path: introspection + 171-probe steering) ---
+# Needs torch (above). transformers + accelerate power the Transformers provider
+# and the F2 residual-stream introspection (Pillar 8); gguf is used by the
+# extractor; bitsandbytes enables 4-bit NF4 load so a 4B model fits a 6GB GPU.
+# Without these, the Transformers provider / RESIDUUM introspection are
+# unavailable (Ollama/Claude paths still work, with F2 off).
+if $HAS_TORCH; then
+  if $PYTHON -c "import transformers, accelerate" 2>/dev/null; then
+    info "Transformers + accelerate present (RESIDUUM / steering ready)"
+  else
+    warn "Installing transformers + accelerate + gguf (RESIDUUM introspection + steering)..."
+    if $HAS_UV; then
+      uv pip install "transformers>=4.48.0" "accelerate>=0.25.0" "gguf>=0.10.0" --python .venv 2>&1 | tail -3
+    else
+      $PYTHON -m pip install "transformers>=4.48.0" "accelerate>=0.25.0" "gguf>=0.10.0" -q 2>&1 | tail -3
+    fi
+  fi
+  # bitsandbytes — 4-bit NF4, CUDA only. Best-effort; skip silently on CPU torch.
+  if $PYTHON -c "import bitsandbytes" 2>/dev/null; then
+    info "bitsandbytes present (4-bit load available)"
+  elif $PYTHON -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+    warn "Installing bitsandbytes (4-bit NF4 load for 6GB GPUs)..."
+    if $HAS_UV; then
+      uv pip install "bitsandbytes>=0.43.0" --python .venv 2>&1 | tail -3
+    else
+      $PYTHON -m pip install "bitsandbytes>=0.43.0" -q 2>&1 | tail -3
+    fi
+  else
+    dim "  CPU-only torch — skipping bitsandbytes (4-bit needs CUDA)."
   fi
 fi
 

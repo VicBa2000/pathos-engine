@@ -230,6 +230,18 @@ it implements them computationally for the first time in a unified system.
     texture, sound, movement, temporality, metaphor) from emotional
     state, with temporal evolution tracking.
 
+  EMOTION CONCEPTS AS LINEAR DIRECTIONS (RESIDUUM Pillar 8)
+    Jack Lindsey, Nicholas Sofroniew, et al. (Anthropic) — "Emotion
+    Concepts and their Function in a Large Language Model" (2026)
+    The core idea: functional emotions exist as measurable LINEAR
+    DIRECTIONS in a language model's residual stream — readable by
+    projection and causal by vector addition. Pathos implements this as
+    171 emotion probes: it reads the residual to MEASURE the model's
+    encoded emotional state (introspection) and steers via fraction-of-norm
+    vector addition, with caps grounded in the paper's documented
+    behavioral-swing thresholds. Pathos does not claim authorship of this
+    research — it implements the paper's findings computationally.
+
 ===============================================================================
 2. OPEN SOURCE DEPENDENCIES
 ===============================================================================

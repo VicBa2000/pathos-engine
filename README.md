@@ -132,7 +132,7 @@ Not just prompt injection. These systems modify the LLM's internal processing:
 | **Conditioning Tokens** | Trained tokens | Special tokens (`<V+3><A-1>`) learned via QLoRA fine-tuning |
 | **Emotional Adapter** | LoRA weights | QLoRA adapter that conditions response patterns on emotional state |
 
-**Dual-path**: local models get full steering + sampling + attention via Ollama/Steering toggle in the Model Manager (compatible architectures: llama, qwen2/2.5, mistral, phi3, starcoder2). Cloud APIs degrade gracefully to prompt injection + temperature.
+**Dual-path**: local models get full steering + sampling + attention via the Ollama/Steering toggle in the Model Manager (compatible architectures — HF-mappable or GGUF-loadable: llama, qwen2/2.5, qwen3, gemma, mistral, phi3, starcoder2). RESIDUUM introspection rides on this same Transformers path and is surfaced live (per-model readiness badge, a global Introspection indicator, and a per-message divergence chip in the chat). Cloud APIs degrade gracefully to prompt injection + temperature.
 
 ### ANIMA v5 — Emergent Emotion Pillars (toggleable)
 

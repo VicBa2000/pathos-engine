@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as api from "../api/client";
 import type { ModelInfo, FeaturedModel, SearchResult, DownloadStatus, HuggingFaceCheck, CloudPreset, CloudProviderInfo, CloudTestResult, ArkSwitchInfo } from "../api/client";
+import { ConfirmModal } from "./ConfirmModal";
 import "./ModelManagerPanel.css";
 
 type Tab = "local" | "featured" | "search" | "cloud" | "hf";
@@ -186,30 +187,67 @@ function LocalTab({ models, currentModel, onSwitch, onRefresh, onDelete, activeP
   const [extracting, setExtracting] = useState<string | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
 
-  const handleToggleSteering = async (model: string, hasCached: boolean, currentlyDirect: boolean) => {
-    if (currentlyDirect) {
-      setSwitching(model);
-      try { await onSwitch("ollama", model); } finally { setSwitching(null); }
-      return;
-    }
-    if (hasCached) {
-      setSwitching(model);
-      try { await onSwitch("transformers", model); } finally { setSwitching(null); }
-      return;
-    }
-    // Extract vectors first, then switch
-    setExtracting(model);
+  // RESIDUUM (Pillar 8) probe-library extraction — background, GPU-exclusive.
+  const [extractingProbes, setExtractingProbes] = useState<string | null>(null);
+  const [probeError, setProbeError] = useState<string | null>(null);
+  const [confirmModel, setConfirmModel] = useState<string | null>(null);
+  const probePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => () => { if (probePollRef.current) clearInterval(probePollRef.current); }, []);
+
+  const pollProbeStatus = (model: string) => {
+    if (probePollRef.current) clearInterval(probePollRef.current);
+    probePollRef.current = setInterval(async () => {
+      try {
+        const s = await api.getResiduumExtractStatus(model);
+        if (s.status === "ready" || s.status === "done") {
+          if (probePollRef.current) clearInterval(probePollRef.current);
+          setExtractingProbes(null);
+          onRefresh();
+        } else if (s.status === "error") {
+          if (probePollRef.current) clearInterval(probePollRef.current);
+          setExtractingProbes(null);
+          setProbeError(s.error || "Probe extraction failed");
+        }
+      } catch { /* transient — keep polling */ }
+    }, 6000);
+  };
+
+  const handleExtractProbes = async (model: string) => {
+    setProbeError(null);
+    setConfirmModel(null);
+    setExtractingProbes(model);
     try {
-      const result = await api.extractSteeringVectors(model);
-      if (result.status === "done" || result.status === "already_cached") {
-        onRefresh();
-        setSwitching(model);
-        setExtracting(null);
-        try { await onSwitch("transformers", model); } finally { setSwitching(null); }
+      const r = await api.extractResiduumProbes(model);
+      if (r.status === "already_present") { setExtractingProbes(null); onRefresh(); return; }
+      if (r.status === "busy") {
+        setExtractingProbes(null);
+        setProbeError(`GPU busy — already extracting ${r.busy_with}. One at a time.`);
+        return;
       }
-    } catch (err) {
-      console.error("Extraction failed:", err);
-      setExtracting(null);
+      pollProbeStatus(model); // "started" | "running"
+    } catch (e) {
+      setExtractingProbes(null);
+      setProbeError(e instanceof Error ? e.message : "Failed to start extraction");
+    }
+  };
+
+  const handleToggleSteering = async (model: string, _hasCached: boolean, currentlyDirect: boolean) => {
+    // The "Direct" toggle only switches paths: Ollama (prompt injection) <->
+    // Transformers (Direct = steering + introspection). We do NOT pre-extract
+    // legacy 4D steering vectors here: that call blocks and FAILS for HF-only
+    // models like qwen3 (it tries a GGUF load that needs the gguf package),
+    // which is what made the toggle spin and revert to Ollama. The Direct path
+    // doesn't need 4D — the backend loads granular v2 steering from the probe
+    // library when present, legacy 4D when cached, and degrades gracefully
+    // otherwise. Switching is the whole operation; if the model load fails the
+    // parent surfaces the error and the toggle stays on Ollama.
+    const target = currentlyDirect ? "ollama" : "transformers";
+    setSwitching(model);
+    try {
+      await onSwitch(target, model);
+    } finally {
+      setSwitching(null);
     }
   };
 
@@ -245,23 +283,82 @@ function LocalTab({ models, currentModel, onSwitch, onRefresh, onDelete, activeP
                   }
                 }}
                 title={!m.steering_compatible
-                  ? "Steering not available for this architecture"
-                  : isExtracting
-                  ? "Extracting steering vectors..."
+                  ? "Steering not available — this model can't load via the Transformers path (cloud / incompatible architecture)."
                   : isSwitching
                   ? "Loading model..."
                   : isDirectActive
-                  ? "Click to switch to Ollama (prompt injection)"
-                  : "Click to enable Steering (direct LLM modification)"}
+                  ? "Steering ACTIVE (Transformers path). Introspection runs too when this model has a probe library. Click to switch back to Ollama (prompt injection)."
+                  : "Enable Steering — switches to the Transformers path (direct residual modification). RESIDUUM introspection turns on too IF this model has a probe library."}
               >
                 <span className="mm-toggle__label mm-toggle__label--left">Ollama</span>
                 <div className="mm-toggle__track">
                   <div className={`mm-toggle__thumb ${isBusy ? "mm-toggle__thumb--loading" : ""}`} />
                 </div>
                 <span className={`mm-toggle__label mm-toggle__label--right ${isBusy ? "mm-toggle__label--loading" : ""}`}>
-                  {isExtracting ? "Extracting..." : isSwitching ? "Loading..." : "Steering"}
+                  {isSwitching ? "Loading..." : "Steering"}
                 </span>
               </div>
+              {/* Steering is the base mode (Transformers path). We show a small
+                  "active" pill only while Steering is on. Introspection state is
+                  conveyed by the RESIDUUM badge (next), not a second pill — a
+                  third element here pushed the badge out of view. */}
+              {isDirectActive && (
+                <span
+                  title="Steering (write) — active on the Transformers path. Modulates the residual stream. Introspection state is shown by the RESIDUUM badge."
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: "0.25rem",
+                    fontSize: "0.6rem", padding: "0.1rem 0.4rem", borderRadius: "3px",
+                    background: "#2c3a2c", color: "#cfe8cf", whiteSpace: "nowrap", marginLeft: "0.1rem",
+                  }}
+                >
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#5fd35f" }} />
+                  🎚 Steering
+                </span>
+              )}
+              {/* RESIDUUM (Pillar 8) introspection readiness — needs the
+                  Transformers path + a 171-probe library for this model.
+                  The amber "needs extraction" state is clickable to extract. */}
+              {(() => {
+                const rs = m.residuum_status || "unsupported";
+                if (extractingProbes === m.name) {
+                  return (
+                    <span
+                      title="Extracting the 171-probe library… background job, GPU-exclusive. May take minutes (GPU) to longer (CPU). The badge turns green when done."
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                        fontSize: "0.62rem", padding: "0.12rem 0.45rem", borderRadius: "3px",
+                        background: "#5a4a2a", color: "#ddd", whiteSpace: "nowrap", cursor: "progress",
+                      }}
+                    >
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#e0b050", display: "inline-block" }} />
+                      ⏳ Extracting…
+                    </span>
+                  );
+                }
+                const cfg = rs === "ready"
+                  ? { color: "#3a5a3a", dot: "#5fd35f", label: "RESIDUUM", clickable: false,
+                      title: "Introspection READY — residual-stream readout (171 probes). Auto-on when Steering is ON (depends on it)." }
+                  : rs === "needs_extraction"
+                  ? { color: "#5a4a2a", dot: "#e0b050", label: "RESIDUUM ⚠", clickable: true,
+                      title: "Compatible arch, but no probe library yet. Click to extract it (one-time background job; GPU-exclusive, can fail)." }
+                  : { color: "#3a3a3a", dot: "#666", label: "RESIDUUM —", clickable: false,
+                      title: "Introspection unavailable — needs the local Transformers path + a compatible architecture. Ollama/cloud run with F2 off." };
+                return (
+                  <span
+                    title={cfg.title}
+                    onClick={cfg.clickable ? (e) => { e.stopPropagation(); setConfirmModel(m.name); } : undefined}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                      fontSize: "0.62rem", padding: "0.12rem 0.45rem", borderRadius: "3px",
+                      background: cfg.color, color: "#ddd", whiteSpace: "nowrap",
+                      cursor: cfg.clickable ? "pointer" : "help",
+                    }}
+                  >
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.dot, display: "inline-block" }} />
+                    {cfg.label}
+                  </span>
+                );
+              })()}
               <button
                 className="mm-model-row__delete"
                 onClick={(e) => { e.stopPropagation(); onDelete(m.name); }}
@@ -271,6 +368,37 @@ function LocalTab({ models, currentModel, onSwitch, onRefresh, onDelete, activeP
           </div>
         );
       })}
+      {probeError && (
+        <div style={{
+          margin: "0.4rem 0", padding: "0.4rem 0.6rem", fontSize: "0.7rem",
+          background: "#4a2323", color: "#f0c0c0", borderRadius: "4px",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <span>⚠ {probeError}</span>
+          <button
+            onClick={() => setProbeError(null)}
+            style={{ background: "none", border: "none", color: "#f0c0c0", cursor: "pointer" }}
+          >✕</button>
+        </div>
+      )}
+      <ConfirmModal
+        visible={confirmModel !== null}
+        danger
+        title="Extract RESIDUUM probe library?"
+        message={
+          `Builds the 171-emotion probe library for "${confirmModel}" by running ~2,500 short ` +
+          `stories through the model and capturing residual activations. ` +
+          `It runs in the background — you can keep using the app. ` +
+          `The GPU is exclusive: do NOT switch a model to the Steering (Transformers) path while ` +
+          `it runs, or it may run out of memory. Expect minutes on GPU for HF-mappable models ` +
+          `(loaded 4-bit), much longer on the CPU fallback. It can fail (unsupported architecture, ` +
+          `out of memory, network). The badge turns green when the library is ready.`
+        }
+        confirmLabel="Start extraction"
+        cancelLabel="Cancel"
+        onConfirm={() => { if (confirmModel) handleExtractProbes(confirmModel); }}
+        onCancel={() => setConfirmModel(null)}
+      />
     </div>
   );
 }

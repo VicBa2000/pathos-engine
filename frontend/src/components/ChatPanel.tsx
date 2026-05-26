@@ -1,10 +1,36 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { ChatMessage } from "../types/emotion";
+import type { ChatMessage, ChatResiduumSummary } from "../types/emotion";
 import { EMOTION_COLORS } from "../types/emotion";
 import { VoiceOrb } from "./VoiceOrb";
 import { MicInput } from "./MicInput";
 import * as api from "../api/client";
 import "./ChatPanel.css";
+
+// RESIDUUM per-message chip styling. Framing-safe vocabulary (coherencia /
+// divergencia, never "deception"). dot = accent used for both chip + the
+// message bubble's left border.
+const RESIDUUM_GAP: Record<string, { label: string; bg: string; dot: string }> = {
+  "aligned": { label: "coherente", bg: "#2c3a2c", dot: "#5fd35f" },
+  "mild-divergence": { label: "divergencia leve", bg: "#3a3722", dot: "#f1c40f" },
+  "divergence-risk": { label: "divergencia (riesgo)", bg: "#3a2e1d", dot: "#e67e22" },
+  "divergence-critical": { label: "divergencia crítica", bg: "#3a2222", dot: "#e74c3c" },
+};
+
+/** Does the residual engine have anything to show for this turn? */
+function residuumActive(r?: ChatResiduumSummary): boolean {
+  return !!r && (r.introspection_active || r.steering_version === "v2");
+}
+
+const fmtDelta = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(2)}`;
+
+function steeringLabel(r: ChatResiduumSummary): string {
+  if (r.steering_version === "v2") {
+    const p = r.steering_probes > 0 ? ` ·${r.steering_probes}p` : "";
+    return `granular v2${p} · cap ${r.fraction_cap.toFixed(2)}`;
+  }
+  if (r.steering_version === "v1") return `4D v1 · cap ${r.fraction_cap.toFixed(2)}`;
+  return "none";
+}
 
 interface Props {
   messages: ChatMessage[];
@@ -24,6 +50,7 @@ interface Props {
 export function ChatPanel({ messages, onSend, loading, disabled, disabledReason, voiceInputEnabled, micStream, onSendAudio, sessionId, voiceEnabled, onClearChat, onAudioState }: Props) {
   const [input, setInput] = useState("");
   const [transcribing, setTranscribing] = useState(false);
+  const [expandedResiduum, setExpandedResiduum] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -81,8 +108,17 @@ export function ChatPanel({ messages, onSend, loading, disabled, disabledReason,
               : "Start a conversation..."}
           </div>
         )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`chat__msg chat__msg--${msg.role}`}>
+        {messages.map((msg, i) => {
+          const showResiduum = msg.role === "assistant" && residuumActive(msg.residuum);
+          const gap = showResiduum
+            ? (RESIDUUM_GAP[msg.residuum!.gap_classification] ?? RESIDUUM_GAP.aligned)
+            : null;
+          return (
+          <div
+            key={i}
+            className={`chat__msg chat__msg--${msg.role}`}
+            style={gap ? { borderLeft: `3px solid ${gap.dot}` } : undefined}
+          >
             <div className="chat__msg-content">{msg.content}</div>
             {msg.role === "assistant" && msg.emotional_state && (
               <>
@@ -104,11 +140,58 @@ export function ChatPanel({ messages, onSend, loading, disabled, disabledReason,
                   >
                     {msg.emotional_state.primary_emotion} {(msg.emotional_state.intensity * 100).toFixed(0)}%
                   </span>
+                  {showResiduum && gap && (
+                    <span
+                      title="RESIDUUM — lectura del residual (introspección) + steering granular. Click para detalle. No modifica la respuesta."
+                      onClick={() => setExpandedResiduum(expandedResiduum === i ? null : i)}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                        marginLeft: "0.4rem", cursor: "pointer", fontSize: "0.66rem",
+                        padding: "0.1rem 0.45rem", borderRadius: "3px",
+                        background: gap.bg, color: "#e0e0e0",
+                      }}
+                    >
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: gap.dot }} />
+                      🧠 {gap.label}
+                      {msg.residuum!.introspection_active && msg.residuum!.gap_magnitude > 0
+                        ? ` ·${msg.residuum!.gap_magnitude.toFixed(2)}` : ""}
+                      <span style={{ opacity: 0.55 }}>{expandedResiduum === i ? "▾" : "▸"}</span>
+                    </span>
+                  )}
                 </div>
+                {showResiduum && expandedResiduum === i && (
+                  <div
+                    className="chat__residuum-detail"
+                    style={{
+                      marginTop: "0.35rem", padding: "0.45rem 0.6rem",
+                      background: "#1b1b21", borderRadius: "4px",
+                      fontSize: "0.66rem", color: "#bbb", lineHeight: 1.55,
+                    }}
+                  >
+                    {msg.residuum!.introspection_active ? (
+                      <>
+                        <div><b style={{ color: "#ccc" }}>medido:</b> {msg.residuum!.top_emotions.join(", ") || "—"}</div>
+                        <div>
+                          ΔV {fmtDelta(msg.residuum!.valence_delta)} · ΔA {fmtDelta(msg.residuum!.arousal_delta)}{" "}
+                          <span style={{ opacity: 0.55 }}>(medido − calculado)</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ opacity: 0.7 }}>introspección no corrió este turno</div>
+                    )}
+                    <div><b style={{ color: "#ccc" }}>steering:</b> {steeringLabel(msg.residuum!)}</div>
+                    {msg.residuum!.consecutive_divergence_turns > 0 && (
+                      <div style={{ color: gap.dot }}>
+                        divergencia sostenida: {msg.residuum!.consecutive_divergence_turns} turno(s)
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>
-        ))}
+          );
+        })}
         {loading && (
           <div className="chat__msg chat__msg--assistant">
             <div className="chat__msg-content chat__typing">

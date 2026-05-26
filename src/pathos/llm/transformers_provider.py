@@ -34,7 +34,10 @@ from pathos.llm.base import LLMProvider
 logger = logging.getLogger(__name__)
 
 # Default generation parameters
-_DEFAULT_MAX_NEW_TOKENS = 512
+# 1024 (not 512) gives qwen3-style thinking models room to finish their
+# <think> block AND still emit a visible answer; with 512 the reasoning was
+# truncated mid-stream, leaving an unclosed <think> that leaked to the user.
+_DEFAULT_MAX_NEW_TOKENS = 1024
 _DEFAULT_TEMPERATURE = 0.7
 _DEFAULT_TOP_P = 0.9
 _DEFAULT_REPETITION_PENALTY = 1.1
@@ -343,8 +346,8 @@ class TransformersProvider(LLMProvider):
         tp = top_p if top_p is not None else _DEFAULT_TOP_P
         rp = repetition_penalty if repetition_penalty is not None else _DEFAULT_REPETITION_PENALTY
 
-        # Build prompt: system + conversation
-        prompt = self._build_prompt(system_prompt, messages)
+        # Build prompt: system + conversation (think wired to the chat template)
+        prompt = self._build_prompt(system_prompt, messages, think=think)
 
         inputs = self._tokenizer(
             prompt,
@@ -406,12 +409,18 @@ class TransformersProvider(LLMProvider):
         new_tokens = outputs[0][input_len:]
         content = self._tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
-        # Strip thinking tags (qwen3 style)
-        if "<think>" in content:
-            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        # Strip qwen3-style thinking robustly. Cases handled:
+        #  1) well-formed <think>...</think>
+        #  2) leaked closing tag only (reasoning before a stray </think>)
+        #  3) TRUNCATED thinking: an opening <think> with NO closing tag, which
+        #     happens when the token budget runs out mid-reasoning. The earlier
+        #     code missed this and the raw chain-of-thought leaked to the user.
         if "</think>" in content:
-            idx = content.rfind("</think>")
-            content = content[idx + len("</think>"):].strip()
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            if "</think>" in content:  # closing tag without a matching opener
+                content = content[content.rfind("</think>") + len("</think>"):].strip()
+        if "<think>" in content:  # unclosed (truncated) reasoning — drop it
+            content = content[: content.find("<think>")].strip()
 
         return content
 
@@ -453,23 +462,30 @@ class TransformersProvider(LLMProvider):
             except ImportError:
                 pass
 
-    def _build_prompt(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
+    def _build_prompt(
+        self, system_prompt: str, messages: list[dict[str, str]], think: bool = True,
+    ) -> str:
         """Build a chat prompt using the tokenizer's chat template if available.
 
-        Falls back to a simple format if no template is configured.
+        `think` is wired to the template's enable_thinking (qwen3 et al.) so the
+        provider honours think=False the same way the Ollama provider does
+        (payload["think"]=False). Falls back to a simple format if no template.
         """
         chat_messages = [{"role": "system", "content": system_prompt}] + messages
 
         # Try using the tokenizer's built-in chat template
         if hasattr(self._tokenizer, "apply_chat_template"):
-            try:
-                return self._tokenizer.apply_chat_template(
-                    chat_messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-            except Exception:
-                pass  # Fallback to manual format
+            # Some templates accept enable_thinking; others reject unknown kwargs.
+            for kwargs in ({"enable_thinking": think}, {}):
+                try:
+                    return self._tokenizer.apply_chat_template(
+                        chat_messages,
+                        tokenize=False,
+                        add_generation_prompt=True,
+                        **kwargs,
+                    )
+                except Exception:
+                    continue  # try without enable_thinking, then manual fallback
 
         # Simple fallback format
         parts = [f"<|system|>\n{system_prompt}\n"]

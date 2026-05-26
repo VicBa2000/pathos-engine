@@ -721,15 +721,36 @@ With Advanced Mode OFF, the pipeline is: 1 → 3 → 6 (lerp) → 7 → 12 → 1
     provider. TransformersProvider loads HuggingFace safetensors (not Ollama
     GGUF) to avoid dequantization bugs.
 
-  UI: Local tab shows Ollama/Steering toggle per model:
+  UI: Local tab shows an Ollama/Steering toggle per model:
     Toggle left (green)  = Ollama HTTP (prompt injection, fast)
-    Toggle right (purple) = TransformersProvider (steering + attention + prefix)
-    Toggle disabled (grey) = architecture not compatible with steering
-    Compatible: llama, qwen2/2.5, mistral, phi3, starcoder2
-    Not compatible: qwen3, gemma (GGUF arch not in transformers)
-    First Steering activation auto-downloads HF safetensors (~4GB, cached)
-    and extracts steering vectors. Loading shows animated indicator.
-    GET /models returns steering_compatible and vectors_cached per model.
+    Toggle right (purple) = TransformersProvider — the "Direct" path: enables
+      Steering (write) and, when a probe library is present, RESIDUUM
+      Introspection (read). A small "Steering" pill shows while active.
+    Toggle disabled (grey) = model cannot load via the Transformers path
+      (cloud / incompatible). steering_compatible = HF-mappable OR GGUF-loadable,
+      so llama, qwen2/2.5, qwen3, gemma, mistral, phi3, starcoder2 all qualify
+      (qwen3/gemma load HF safetensors even though their GGUF arch is absent).
+    Switching is DIRECT — no blocking 4D extraction. The backend loads granular
+      v2 steering from the probe library when present, legacy 4D when cached, and
+      degrades gracefully otherwise. Loading shows an animated indicator.
+    GET /models returns steering_compatible, vectors_cached and residuum_status
+      ("ready" | "needs_extraction" | "unsupported") per model.
+
+  UI: RESIDUUM (Pillar 8) visibility:
+    - Per-model RESIDUUM badge (Model Manager): ready (green) / needs_extraction
+      (amber — click to extract the 171-probe library; one-time background job,
+      GPU-exclusive) / unsupported (grey). Steering is the base mode and
+      Introspection depends on it: without Steering there are no probes.
+    - Global "Introspection" indicator (bottom-left), polling /residuum/status:
+      ON / ready / off — tells you at a glance whether the residual is read.
+    - Per-message chip in chat (Companion/Raw/Extreme): measured divergence
+      (coherente / divergencia leve|riesgo|critica + magnitude), with a colored
+      bubble border, expandable to the measured top emotions, deltaV/deltaA
+      (measured-calculated) and the steering composite (v2 / probes / cap). It is
+      READ-ONLY telemetry and never alters the response. Backed by
+      ChatResponse.residuum (compact per-turn summary). Raw/Extreme run on the
+      Transformers path too, so the chip there shows the higher cap (0.12/0.15)
+      and amplified state — steering amplifies within the cap, never censors.
 
   POST /models/steering/extract
     Body: { "model": "qwen2.5:3b", "device": "auto" }
@@ -1358,6 +1379,13 @@ ENDPOINTS
   POST /residuum/toggle/{session_id}        — enable/disable F2 (manual override)
   GET  /residuum/status/{session_id}        — readiness + last measurement
   POST /residuum/baseline-strength/{session_id} — set/clear F6 strength override
+  POST /residuum/extract                    — build a model's 171-probe library
+                                              (background, one-time, GPU-exclusive;
+                                              status flips residuum_status->ready)
+  GET  /residuum/extract/status/{model}     — poll extraction progress
+  Per-turn /chat (+ /raw/chat) responses carry a compact residuum summary
+  (ChatResiduumSummary: introspection_active, gap, top_emotions, steering_version,
+  fraction_cap) so the chat chip works outside Research mode.
 
 RESEARCH PANEL
   Residuum Introspection (measured top-5 + VAD vs calculated + gap), dual
