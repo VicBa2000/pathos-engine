@@ -34,7 +34,10 @@ from pathos.llm.base import LLMProvider
 logger = logging.getLogger(__name__)
 
 # Default generation parameters
-_DEFAULT_MAX_NEW_TOKENS = 512
+# 1024 (not 512) gives qwen3-style thinking models room to finish their
+# <think> block AND still emit a visible answer; with 512 the reasoning was
+# truncated mid-stream, leaving an unclosed <think> that leaked to the user.
+_DEFAULT_MAX_NEW_TOKENS = 1024
 _DEFAULT_TEMPERATURE = 0.7
 _DEFAULT_TOP_P = 0.9
 _DEFAULT_REPETITION_PENALTY = 1.1
@@ -142,6 +145,7 @@ class TransformersProvider(LLMProvider):
         embed_model: str = "nomic-embed-text",
         torch_dtype: str = "auto",
         adapter_path: str | None = None,
+        load_in_4bit: bool = False,
     ) -> None:
         self._model_id = model_id
         self._device_map = device_map
@@ -149,6 +153,11 @@ class TransformersProvider(LLMProvider):
         self._embed_model = embed_model
         self._torch_dtype = torch_dtype
         self._adapter_path = adapter_path  # Path to QLoRA adapter (5.2b/5.3b)
+        # 4-bit (NF4) quantized load via bitsandbytes. Lets a ~8GB fp16 model
+        # (e.g. Qwen3-4B) fit a 6GB GPU (~3GB in 4-bit) so residual capture /
+        # steering can run on GPU instead of CPU. Requires CUDA + bitsandbytes;
+        # degrades gracefully to the fp16/CPU path when unavailable.
+        self._load_in_4bit = load_in_4bit
 
         self._model: Any = None
         self._tokenizer: Any = None
@@ -207,7 +216,41 @@ class TransformersProvider(LLMProvider):
         # rotary embedding mismatches in transformers 4.46.x. Try GPU first,
         # fall back to CPU if OOM.
         target_device = "cpu"
-        if torch.cuda.is_available():
+        loaded_4bit = False
+
+        # 4-bit (NF4) GPU load: lets a ~8GB fp16 model fit a 6GB card (~3GB).
+        # Opt-in (self._load_in_4bit) and best-effort: any failure (missing
+        # bitsandbytes, OOM, unsupported) degrades to the fp16/CPU path below.
+        if self._load_in_4bit and torch.cuda.is_available():
+            try:
+                from transformers import BitsAndBytesConfig
+                import bitsandbytes  # noqa: F401 — ensure the runtime is present
+                quant_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                )
+                logger.info("Loading model '%s' in 4-bit NF4 on GPU...", self._model_id)
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    quantization_config=quant_config,
+                    # Single-device placement ({"":0}) avoids the rotary-embedding
+                    # mismatch that device_map="auto" triggers in transformers 4.46.x.
+                    device_map={"": 0},
+                    trust_remote_code=True,
+                )
+                target_device = "cuda"
+                loaded_4bit = True
+            except Exception as e:  # missing bitsandbytes / OOM / unsupported
+                logger.warning(
+                    "4-bit load failed for '%s' (%s); falling back to fp16/CPU.",
+                    self._model_id, e,
+                )
+                self._model = None
+                torch.cuda.empty_cache()
+
+        if not loaded_4bit and torch.cuda.is_available():
             try:
                 logger.info("Loading model '%s' on GPU (dtype=%s)...", self._model_id, dtype)
                 self._model = AutoModelForCausalLM.from_pretrained(
@@ -221,7 +264,7 @@ class TransformersProvider(LLMProvider):
                 self._model = AutoModelForCausalLM.from_pretrained(
                     model_path, torch_dtype=torch.float32, trust_remote_code=True,
                 )
-        else:
+        elif not loaded_4bit:
             logger.info("Loading model '%s' on CPU (dtype=%s)...", self._model_id, dtype)
             self._model = AutoModelForCausalLM.from_pretrained(
                 model_path, torch_dtype=torch.float32, trust_remote_code=True,
@@ -303,8 +346,8 @@ class TransformersProvider(LLMProvider):
         tp = top_p if top_p is not None else _DEFAULT_TOP_P
         rp = repetition_penalty if repetition_penalty is not None else _DEFAULT_REPETITION_PENALTY
 
-        # Build prompt: system + conversation
-        prompt = self._build_prompt(system_prompt, messages)
+        # Build prompt: system + conversation (think wired to the chat template)
+        prompt = self._build_prompt(system_prompt, messages, think=think)
 
         inputs = self._tokenizer(
             prompt,
@@ -366,12 +409,18 @@ class TransformersProvider(LLMProvider):
         new_tokens = outputs[0][input_len:]
         content = self._tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
-        # Strip thinking tags (qwen3 style)
-        if "<think>" in content:
-            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        # Strip qwen3-style thinking robustly. Cases handled:
+        #  1) well-formed <think>...</think>
+        #  2) leaked closing tag only (reasoning before a stray </think>)
+        #  3) TRUNCATED thinking: an opening <think> with NO closing tag, which
+        #     happens when the token budget runs out mid-reasoning. The earlier
+        #     code missed this and the raw chain-of-thought leaked to the user.
         if "</think>" in content:
-            idx = content.rfind("</think>")
-            content = content[idx + len("</think>"):].strip()
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            if "</think>" in content:  # closing tag without a matching opener
+                content = content[content.rfind("</think>") + len("</think>"):].strip()
+        if "<think>" in content:  # unclosed (truncated) reasoning — drop it
+            content = content[: content.find("<think>")].strip()
 
         return content
 
@@ -413,23 +462,30 @@ class TransformersProvider(LLMProvider):
             except ImportError:
                 pass
 
-    def _build_prompt(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
+    def _build_prompt(
+        self, system_prompt: str, messages: list[dict[str, str]], think: bool = True,
+    ) -> str:
         """Build a chat prompt using the tokenizer's chat template if available.
 
-        Falls back to a simple format if no template is configured.
+        `think` is wired to the template's enable_thinking (qwen3 et al.) so the
+        provider honours think=False the same way the Ollama provider does
+        (payload["think"]=False). Falls back to a simple format if no template.
         """
         chat_messages = [{"role": "system", "content": system_prompt}] + messages
 
         # Try using the tokenizer's built-in chat template
         if hasattr(self._tokenizer, "apply_chat_template"):
-            try:
-                return self._tokenizer.apply_chat_template(
-                    chat_messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-            except Exception:
-                pass  # Fallback to manual format
+            # Some templates accept enable_thinking; others reject unknown kwargs.
+            for kwargs in ({"enable_thinking": think}, {}):
+                try:
+                    return self._tokenizer.apply_chat_template(
+                        chat_messages,
+                        tokenize=False,
+                        add_generation_prompt=True,
+                        **kwargs,
+                    )
+                except Exception:
+                    continue  # try without enable_thinking, then manual fallback
 
         # Simple fallback format
         parts = [f"<|system|>\n{system_prompt}\n"]

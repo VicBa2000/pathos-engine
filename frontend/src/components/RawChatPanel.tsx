@@ -27,7 +27,11 @@ export function RawChatPanel({ connected, currentProvider, voiceEnabled, voiceIn
   const [extremeMode, setExtremeMode] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const isOllama = currentProvider === "ollama";
+  // Raw Mode runs on any LOCAL provider — Ollama (prompt injection) or
+  // Transformers (Steering / RESIDUUM). Only cloud providers are blocked
+  // (their content filters defeat Raw's purpose). Matches the backend
+  // /raw/chat gate, which accepts both local paths and rejects only cloud.
+  const isLocal = currentProvider === "ollama" || currentProvider === "transformers";
 
   // Auto-scroll
   useEffect(() => {
@@ -42,7 +46,7 @@ export function RawChatPanel({ connected, currentProvider, voiceEnabled, voiceIn
   }, [sessionId]);
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || loading || !isOllama) return;
+    if (!input.trim() || loading || !isLocal) return;
     const msg = input.trim();
     setInput("");
     setMessages(prev => [...prev, { role: "user", content: msg }]);
@@ -64,7 +68,7 @@ export function RawChatPanel({ connected, currentProvider, voiceEnabled, voiceIn
     } finally {
       setLoading(false);
     }
-  }, [input, loading, sessionId, isOllama]);
+  }, [input, loading, sessionId, isLocal]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -133,20 +137,20 @@ export function RawChatPanel({ connected, currentProvider, voiceEnabled, voiceIn
             hostility, profanity, and emotional outbursts.
           </p>
           <div className="raw-warning__rules">
-            <div className="raw-warning__rule">Requires local Ollama model (cloud providers block unfiltered content)</div>
+            <div className="raw-warning__rule">Requires a local model — Ollama or Steering/Transformers (cloud providers block unfiltered content)</div>
             <div className="raw-warning__rule">Nothing is saved — no conversation, no memory, no training data</div>
             <div className="raw-warning__rule">Cannot export or package this session</div>
             <div className="raw-warning__rule">Session is destroyed when you leave this tab</div>
           </div>
-          {!isOllama && (
+          {!isLocal && (
             <div className="raw-warning__blocked">
-              Current provider is <strong>{currentProvider}</strong> — switch to a local Ollama model first.
+              Current provider is <strong>{currentProvider}</strong> (cloud) — switch to a local model (Ollama or Steering) first.
             </div>
           )}
           <button
             className="raw-warning__accept"
             onClick={() => setAccepted(true)}
-            disabled={!isOllama || !connected}
+            disabled={!isLocal || !connected}
           >
             I understand — Enter Raw Mode
           </button>

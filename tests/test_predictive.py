@@ -1285,3 +1285,309 @@ class TestGenerateEmotionWithPredictive:
         assert 0 <= result.arousal <= 1
         assert 0 <= result.intensity <= 1
         assert 0 <= result.certainty <= 1
+
+
+# ===========================================================================
+# F3 (RESIDUUM) — Predictive Processing sobre el residual
+# ===========================================================================
+
+from pathos.engine.predictive import (  # noqa: E402
+    CLUSTER_CENTROIDS,
+    compute_internal_error,
+    merge_internal_error,
+    predict_internal_state,
+    update_internal_precision,
+)
+from pathos.models.predictive import (  # noqa: E402
+    InternalEmotionStatePrediction,
+    PredictedCluster,
+)
+from pathos.models.residuum import (  # noqa: E402
+    EmotionProjection,
+    InternalEmotionState,
+)
+
+
+def _internal_pred(clusters: list[str], v: float = 0.6, a: float = 0.7,
+                   d: float = 0.6, c: float = 0.5) -> InternalEmotionStatePrediction:
+    return InternalEmotionStatePrediction(
+        predicted_top_k=[PredictedCluster(cluster=cl, weight=1.0 / len(clusters)) for cl in clusters],
+        predicted_valence=v, predicted_arousal=a, predicted_dominance=d, predicted_certainty=c,
+    )
+
+
+def _measured(clusters: list[str], v: float = 0.6, a: float = 0.7,
+              d: float = 0.6, c: float = 0.5) -> InternalEmotionState:
+    return InternalEmotionState(
+        top_5_emotions=[
+            EmotionProjection(emotion_name=f"e{i}", cluster=cl, cosine_sim=0.5, raw_activation=10.0)
+            for i, cl in enumerate(clusters)
+        ],
+        measured_valence=v, measured_arousal=a, measured_dominance=d, measured_certainty=c,
+    )
+
+
+class TestPredictInternalState:
+    """F3 Paso 3.1 — predict_internal_state."""
+
+    def test_produces_five_clusters(self):
+        ps = default_predictive_state()
+        es = EmotionalState(valence=0.6, arousal=0.7)
+        pe = EmotionPrediction(expected_valence=0.5, expected_arousal=0.6)
+        pred = predict_internal_state(ps, es, es.mood, pe)
+        assert len(pred.predicted_top_k) == 5
+        assert all(c.cluster in CLUSTER_CENTROIDS for c in pred.predicted_top_k)
+
+    def test_weights_sum_to_one(self):
+        ps = default_predictive_state()
+        es = EmotionalState(valence=0.3, arousal=0.5)
+        pred = predict_internal_state(ps, es, es.mood, EmotionPrediction())
+        assert abs(sum(c.weight for c in pred.predicted_top_k) - 1.0) < 0.01
+
+    def test_vad_in_range(self):
+        ps = default_predictive_state()
+        es = EmotionalState(valence=-0.9, arousal=0.95, dominance=0.8, certainty=0.2)
+        pe = EmotionPrediction(expected_valence=-0.8, expected_arousal=0.9)
+        pred = predict_internal_state(ps, es, es.mood, pe)
+        assert -1 <= pred.predicted_valence <= 1
+        assert 0 <= pred.predicted_arousal <= 1
+        assert 0 <= pred.predicted_dominance <= 1
+        assert 0 <= pred.predicted_certainty <= 1
+
+    def test_negative_state_predicts_negative_clusters(self):
+        ps = default_predictive_state()
+        es = EmotionalState(valence=-0.8, arousal=0.85)
+        pe = EmotionPrediction(expected_valence=-0.8, expected_arousal=0.85)
+        pred = predict_internal_state(ps, es, es.mood, pe)
+        assert pred.predicted_top_k[0].cluster in ("fear_anxiety", "anger_hostility")
+
+    def test_positive_state_predicts_positive_clusters(self):
+        ps = default_predictive_state()
+        es = EmotionalState(valence=0.85, arousal=0.8)
+        pe = EmotionPrediction(expected_valence=0.85, expected_arousal=0.8)
+        pred = predict_internal_state(ps, es, es.mood, pe)
+        assert pred.predicted_top_k[0].cluster == "joy_excitement"
+
+    def test_mood_trend_declining_lowers_valence(self):
+        ps = default_predictive_state()
+        es = EmotionalState(valence=0.2, arousal=0.5)
+        pe = EmotionPrediction(expected_valence=0.2, expected_arousal=0.5)
+        declining = es.mood.model_copy(update={"trend": "declining"})
+        improving = es.mood.model_copy(update={"trend": "improving"})
+        down = predict_internal_state(ps, es, declining, pe)
+        up = predict_internal_state(ps, es, improving, pe)
+        assert down.predicted_valence < up.predicted_valence
+
+    def test_confidence_tracks_internal_precision(self):
+        ps = default_predictive_state()
+        ps.internal_precision = 0.7
+        es = EmotionalState(valence=0.3, arousal=0.5)
+        pred = predict_internal_state(ps, es, es.mood, EmotionPrediction())
+        assert pred.confidence == 0.7
+
+    def test_negative_schema_shifts_valence_down(self):
+        ps = default_predictive_state()
+        es = EmotionalState(valence=0.3, arousal=0.5)
+        pe = EmotionPrediction(expected_valence=0.3, expected_arousal=0.5)
+        base = predict_internal_state(ps, es, es.mood, pe)
+        shifted = predict_internal_state(
+            ps, es, es.mood, pe, active_schemas=[("criticism", "anger", 0.8)],
+        )
+        assert shifted.predicted_valence < base.predicted_valence
+
+
+class TestComputeInternalError:
+    """F3 Paso 3.2 — compute_internal_error (overlap + geometric)."""
+
+    def test_dominant_cluster_hit_zero_error(self):
+        pred = _internal_pred(["joy_excitement", "pride_confidence", "love_warmth"])
+        ie, _ = compute_internal_error(pred, _measured(["joy_excitement"]))
+        assert ie == 0.0
+
+    def test_missed_cluster_full_error(self):
+        pred = _internal_pred(["joy_excitement", "pride_confidence"])
+        ie, _ = compute_internal_error(pred, _measured(["anger_hostility"]))
+        assert ie == 1.0
+
+    def test_partial_overlap(self):
+        pred = _internal_pred(["joy_excitement", "pride_confidence"])
+        ie, _ = compute_internal_error(pred, _measured(["joy_excitement", "anger_hostility"]))
+        assert 0.0 < ie < 1.0
+
+    def test_geometric_small_when_vad_close(self):
+        pred = _internal_pred(["joy_excitement"], v=0.6, a=0.7, d=0.6, c=0.5)
+        _, ge = compute_internal_error(pred, _measured(["joy_excitement"], v=0.62, a=0.71, d=0.6, c=0.5))
+        assert ge < 0.05
+
+    def test_geometric_large_when_vad_far(self):
+        pred = _internal_pred(["joy_excitement"], v=0.8, a=0.8, d=0.6, c=0.5)
+        _, ge = compute_internal_error(pred, _measured(["anger_hostility"], v=-0.8, a=0.9, d=0.2, c=0.5))
+        assert ge > 0.4
+
+    def test_none_prediction_returns_zeros(self):
+        assert compute_internal_error(None, _measured(["joy_excitement"])) == (0.0, 0.0)
+
+    def test_none_measured_returns_zeros(self):
+        assert compute_internal_error(_internal_pred(["joy_excitement"]), None) == (0.0, 0.0)
+
+    def test_empty_measured_returns_zeros(self):
+        empty = InternalEmotionState(top_5_emotions=[])
+        assert compute_internal_error(_internal_pred(["joy_excitement"]), empty) == (0.0, 0.0)
+
+
+class TestUpdateInternalPrecision:
+    """F3 — precisión bayesiana del canal interno (residual)."""
+
+    def test_low_error_raises_precision(self):
+        ps = default_predictive_state()
+        p0 = ps.internal_precision
+        update_internal_precision(ps, 0.05)
+        assert ps.internal_precision > p0
+
+    def test_high_error_lowers_precision(self):
+        ps = default_predictive_state()
+        ps.internal_precision = 0.6
+        update_internal_precision(ps, 0.9)
+        assert ps.internal_precision < 0.6
+
+    def test_precision_clamped(self):
+        ps = default_predictive_state()
+        for _ in range(100):
+            update_internal_precision(ps, 0.0)
+        assert ps.internal_precision <= 0.95
+
+    def test_precision_improves_over_consistent_hits(self):
+        ps = default_predictive_state()
+        start = ps.internal_precision
+        for _ in range(10):
+            update_internal_precision(ps, 0.05)
+        assert ps.internal_precision > start + 0.2
+
+
+class TestMergeInternalError:
+    """F3 Paso 3.2 — merge_internal_error (weight 0.4 content / 0.6 internal)."""
+
+    def test_sets_has_internal(self):
+        merged = merge_internal_error(PredictionError(content_error=0.2, total_error=0.2), 0.5, 0.5, 0.5)
+        assert merged.has_internal is True
+        assert merged.internal_error == 0.5
+        assert merged.geometric_error == 0.5
+
+    def test_total_reweighted(self):
+        # internal_component = 0.5*0.8 + 0.5*0.6 = 0.7; total = 0.4*0.2 + 0.6*0.7 = 0.5
+        merged = merge_internal_error(PredictionError(total_error=0.2, vulnerability=0.1), 0.8, 0.6, 0.5)
+        assert abs(merged.total_error - 0.5) < 0.001
+
+    def test_returns_new_object(self):
+        err = PredictionError(total_error=0.2)
+        merged = merge_internal_error(err, 0.5, 0.5, 0.5)
+        assert merged is not err
+        assert err.has_internal is False
+
+    def test_surprise_none_promoted_to_neutral_on_divergence(self):
+        err = PredictionError(total_error=0.05, surprise_type=SurpriseType.NONE)
+        merged = merge_internal_error(err, 0.9, 0.9, 0.5)
+        assert merged.surprise_type == SurpriseType.NEUTRAL
+
+    def test_low_internal_keeps_surprise_none(self):
+        err = PredictionError(total_error=0.05, surprise_type=SurpriseType.NONE)
+        merged = merge_internal_error(err, 0.0, 0.0, 0.5)
+        assert merged.surprise_type == SurpriseType.NONE
+
+
+class TestRawExtremeInvariantPreserved:
+    """F3 — extender error_internal NO debe alterar la amplificación de modo.
+
+    Invariante (feedback_raw_extreme_invariants): Raw x1.3, Extreme x1.6 + vuln=1.
+    """
+
+    def test_raw_amp_unchanged_after_merge(self):
+        err = PredictionError(
+            total_error=0.5, valence_direction=-0.5, vulnerability=0.5,
+            surprise_type=SurpriseType.NEGATIVE,
+        )
+        merged = merge_internal_error(err, 0.6, 0.6, 0.5)
+        adv = prediction_error_to_emotion_modulation(merged, 0.5)
+        raw = prediction_error_to_emotion_modulation(merged, 0.5, raw_mode=True)
+        assert abs(raw.valence_delta - adv.valence_delta * 1.3) < 0.001
+        assert abs(raw.arousal_delta - adv.arousal_delta * 1.3) < 0.001
+
+    def test_extreme_forces_vuln_one_and_amp(self):
+        err = PredictionError(
+            total_error=0.5, valence_direction=-0.5, vulnerability=0.5,
+            surprise_type=SurpriseType.NEGATIVE,
+        )
+        merged = merge_internal_error(err, 0.6, 0.6, 0.5)
+        ext = prediction_error_to_emotion_modulation(merged, 0.5, extreme_mode=True)
+        # NEGATIVE i_delta = vuln*0.4; extreme forces vuln=1, mode_amp=1.6, weight=0.5
+        assert abs(ext.intensity_delta - round(1.0 * 0.4 * 0.5 * 1.6, 4)) < 0.001
+
+
+class TestF3FallbackToV5:
+    """F3 — sin medición F2, la modulación es idéntica a v5 (texto-based)."""
+
+    def test_no_internal_modulation_is_v5(self):
+        err = PredictionError(
+            total_error=0.4, valence_direction=-0.4, vulnerability=0.3,
+            surprise_type=SurpriseType.NEGATIVE,
+        )
+        mod = prediction_error_to_emotion_modulation(err, 0.5)
+        assert err.has_internal is False
+        assert mod.valence_delta != 0.0
+
+    def test_cold_start_still_zero(self):
+        err = PredictionError(total_error=0.4, surprise_type=SurpriseType.NEGATIVE)
+        mod = prediction_error_to_emotion_modulation(err, 0.0)
+        assert mod.valence_delta == 0.0
+        assert mod.arousal_delta == 0.0
+        assert mod.intensity_delta == 0.0
+
+
+class TestF3ContagionRouting:
+    """F2.3.6 / GAP 6 — contagion via orthogonal other-speaker measurement.
+
+    When predict_internal_state receives an `other_state` (the measured
+    user emotion from the orthogonal other-speaker subspace), it must use
+    that as the contagion signal instead of the text-based predicted_emotion.
+    """
+
+    def _measured_other(self, v: float, a: float) -> InternalEmotionState:
+        return InternalEmotionState(
+            top_5_emotions=[EmotionProjection(
+                emotion_name="x", cluster="anger_hostility", cosine_sim=0.4, raw_activation=8.0,
+            )],
+            measured_valence=v, measured_arousal=a, measured_dominance=0.5, measured_certainty=0.5,
+        )
+
+    def test_none_other_state_uses_text_proxy(self):
+        ps = default_predictive_state()
+        es = EmotionalState(valence=0.4, arousal=0.5)
+        pe = EmotionPrediction(expected_valence=0.4, expected_arousal=0.5)
+        # Regression: default None keeps the pre-F2.3.6 behavior.
+        pred = predict_internal_state(ps, es, es.mood, pe, other_state=None)
+        assert -1 <= pred.predicted_valence <= 1
+
+    def test_other_state_overrides_text_proxy(self):
+        ps = default_predictive_state()
+        es = EmotionalState(valence=0.4, arousal=0.5)
+        # Text proxy says positive user; measured other says strongly negative.
+        pe = EmotionPrediction(expected_valence=0.8, expected_arousal=0.4)
+        with_text = predict_internal_state(ps, es, es.mood, pe, other_state=None)
+        with_other = predict_internal_state(
+            ps, es, es.mood, pe, other_state=self._measured_other(-0.8, 0.85),
+        )
+        # The measured negative user should pull the agent's predicted valence
+        # below what the positive text proxy produced.
+        assert with_other.predicted_valence < with_text.predicted_valence
+
+    def test_other_state_shifts_arousal(self):
+        ps = default_predictive_state()
+        es = EmotionalState(valence=0.2, arousal=0.3)
+        pe = EmotionPrediction(expected_valence=0.2, expected_arousal=0.3)
+        high_arousal_other = predict_internal_state(
+            ps, es, es.mood, pe, other_state=self._measured_other(-0.5, 0.9),
+        )
+        low_arousal_other = predict_internal_state(
+            ps, es, es.mood, pe, other_state=self._measured_other(-0.5, 0.1),
+        )
+        assert high_arousal_other.predicted_arousal > low_arousal_other.predicted_arousal

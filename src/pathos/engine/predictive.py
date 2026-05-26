@@ -33,6 +33,8 @@ from pathos.models.predictive import (
     DemandPrediction,
     DemandType,
     EmotionPrediction,
+    InternalEmotionStatePrediction,
+    PredictedCluster,
     PredictionError,
     PredictionHistory,
     PredictionRecord,
@@ -40,6 +42,7 @@ from pathos.models.predictive import (
     PredictiveState,
     SurpriseType,
 )
+from pathos.models.residuum import InternalEmotionState
 from pathos.models.social import UserModel
 
 
@@ -837,3 +840,236 @@ def prediction_error_to_emotion_modulation(
         intensity_delta=round(i_delta * predictive_weight * mode_amp, 4),
         certainty_delta=round(c_delta * predictive_weight * mode_amp, 4),
     )
+
+
+# ---------------------------------------------------------------------------
+# F3 (RESIDUUM): Predictive Processing sobre el residual
+# ---------------------------------------------------------------------------
+# El Pilar 1 v5 predice TEXTO. F3 alinea Pilar 1 con Friston/Barrett: la
+# predicción ahora incluye el ESTADO INTERNO que Pathos espera que el LLM
+# codifique, y el error es la distancia al InternalEmotionState MEDIDO en el
+# residual (F2). CORE-si-F2-ON: si F2 está OFF, predict_internal_state se
+# genera pero nunca se evalúa, y la modulación degrada al comportamiento v5.
+#
+# Vocabulario: se predice a nivel de CLUSTER (10 grupos del paper) porque el
+# estado medido expone el cluster de cada probe — así se evita el desajuste
+# entre las 19 emociones canónicas y los 171 probes.
+
+# Centroides (valence, arousal) por cluster, promediados de emotions_171.json.
+# Hardcoded para mantener predictive.py desacoplado de steering_data.
+CLUSTER_CENTROIDS: dict[str, tuple[float, float]] = {
+    "joy_excitement": (0.78, 0.80),
+    "serenity_contentment": (0.58, 0.23),
+    "love_warmth": (0.56, 0.38),
+    "pride_confidence": (0.62, 0.57),
+    "amusement_playfulness": (0.68, 0.58),
+    "sadness_depression": (-0.45, 0.21),
+    "fear_anxiety": (-0.52, 0.72),
+    "anger_hostility": (-0.60, 0.62),
+    "surprise_confusion": (0.02, 0.64),
+    "shame_guilt": (-0.42, 0.45),
+}
+
+# Cuántos clusters retiene la predicción (top-k)
+_INTERNAL_TOP_K: int = 5
+
+# Normalizador de la distancia euclídea VAD-C: valence rango 2, resto rango 1.
+# Max distancia = sqrt(2^2 + 1 + 1 + 1) = sqrt(7).
+_VADC_MAX_DIST: float = math.sqrt(7.0)
+
+
+def predict_internal_state(
+    predictive_state: PredictiveState,
+    emotional_state: EmotionalState,
+    mood: Mood,
+    predicted_emotion: EmotionPrediction,
+    active_schemas: list[tuple[str, str, float]] | None = None,
+    *,
+    turn: int = 0,
+    other_state: InternalEmotionState | None = None,
+) -> InternalEmotionStatePrediction:
+    """F3 — Predice el estado interno que el LLM codificará este turno.
+
+    Se genera en el paso 0c (antes del appraisal), por lo que usa el estado
+    del agente del turno ANTERIOR (inercia emocional) más una corrección por
+    la tendencia del mood, una señal de contagio del usuario y el schema más
+    fuerte activo.
+
+    El top-k se computa por proximidad del VAD predicho a los centroides de
+    cluster, para que sea comparable con el estado medido (que expone cluster).
+
+    other_state (F2.3.6 / GAP 6): medición 'other-speaker' del residual del
+    turno anterior (emoción inferida del usuario). El paper (L842-851) prueba
+    que present-speaker (agente) y other-speaker (usuario) son subespacios
+    ortogonales; cuando hay esa medición la usamos como señal de contagio
+    porque vive en el subespacio correcto. Si es None, caemos al proxy
+    texto-based (predicted_emotion) — comportamiento previo a F2.3.6.
+    """
+    # VAD predicho: inercia + correcciones suaves.
+    base_v = emotional_state.valence
+    base_a = emotional_state.arousal
+
+    if mood.trend == "declining":
+        base_v -= 0.05
+    elif mood.trend == "improving":
+        base_v += 0.05
+
+    # Proxy de contagio: nos acercamos parcialmente a la emoción del usuario.
+    # Preferimos la medición ortogonal 'other' (residual real) sobre el proxy
+    # texto-based, para respetar la ortogonalidad present/other del paper.
+    if other_state is not None:
+        contagion_v = other_state.measured_valence
+        contagion_a = other_state.measured_arousal
+    else:
+        contagion_v = predicted_emotion.expected_valence
+        contagion_a = predicted_emotion.expected_arousal
+    base_v += (contagion_v - base_v) * 0.2
+    base_a += (contagion_a - base_a) * 0.2
+
+    # Schema más fuerte: desplaza la valence esperada.
+    if active_schemas:
+        category, emotion_name, strength = max(active_schemas, key=lambda s: s[2])
+        if strength >= 0.3:
+            if emotion_name in ("anger", "frustration", "fear", "anxiety", "sadness"):
+                base_v -= strength * 0.2
+            elif emotion_name in ("joy", "excitement", "gratitude", "hope"):
+                base_v += strength * 0.15
+
+    pred_v = _clamp(base_v, -1.0, 1.0)
+    pred_a = _clamp(base_a, 0.0, 1.0)
+    # Dominance y certainty se mueven lento: heredan del estado actual.
+    pred_d = _clamp(emotional_state.dominance, 0.0, 1.0)
+    pred_c = _clamp(emotional_state.certainty, 0.0, 1.0)
+
+    # Top-k clusters por cercanía (valence/2, arousal) al centroide.
+    scored: list[tuple[str, float]] = []
+    for name, (cv, ca) in CLUSTER_CENTROIDS.items():
+        dv = (pred_v - cv) / 2.0
+        da = pred_a - ca
+        dist = math.sqrt(dv * dv + da * da)
+        scored.append((name, dist))
+    scored.sort(key=lambda x: x[1])
+    top = scored[:_INTERNAL_TOP_K]
+
+    # Pesos por inversa de la distancia, normalizados.
+    inv = [(name, 1.0 / (dist + 0.1)) for name, dist in top]
+    total_inv = sum(w for _, w in inv) or 1.0
+    predicted_top_k = [
+        PredictedCluster(cluster=name, weight=round(w / total_inv, 4))
+        for name, w in inv
+    ]
+
+    return InternalEmotionStatePrediction(
+        predicted_top_k=predicted_top_k,
+        predicted_valence=round(pred_v, 4),
+        predicted_arousal=round(pred_a, 4),
+        predicted_dominance=round(pred_d, 4),
+        predicted_certainty=round(pred_c, 4),
+        confidence=round(predictive_state.internal_precision, 4),
+        turn=turn,
+    )
+
+
+def compute_internal_error(
+    prediction: InternalEmotionStatePrediction | None,
+    measured: InternalEmotionState | None,
+) -> tuple[float, float]:
+    """F3 — Error entre el estado interno PREDICHO y el MEDIDO en el residual.
+
+    Returns (internal_error, geometric_error):
+      - internal_error: distancia de Jaccard entre los clusters predichos y los
+        clusters de los top-5 probes medidos. 0 = mismos clusters.
+      - geometric_error: distancia euclídea VAD-C normalizada. 0 = mismo punto.
+
+    Si no hay predicción o medición, devuelve (0.0, 0.0); el caller decide
+    has_internal segun si hubo medición real.
+    """
+    if prediction is None or measured is None or not measured.top_5_emotions:
+        return 0.0, 0.0
+
+    pred_clusters = {c.cluster for c in prediction.predicted_top_k}
+    meas_clusters = {e.cluster for e in measured.top_5_emotions}
+
+    if not pred_clusters or not meas_clusters:
+        internal_error = 0.0 if (not pred_clusters and not meas_clusters) else 1.0
+    else:
+        # Overlap coefficient (Szymkiewicz–Simpson), not raw Jaccard: the
+        # measured top-5 PROBES collapse to few distinct clusters (the residual
+        # is dominated by 1-2 directions), so raw Jaccard would penalize even a
+        # perfect prediction by the size asymmetry (5 predicted vs ~2 measured).
+        # |A∩B| / min(|A|,|B|) asks "did I predict the dominant cluster(s)?" and
+        # stays 0-distance on a correct hit — required for precision to improve.
+        intersection = len(pred_clusters & meas_clusters)
+        denom = min(len(pred_clusters), len(meas_clusters))
+        overlap = intersection / denom if denom > 0 else 0.0
+        internal_error = round(1.0 - overlap, 4)
+
+    dv = measured.measured_valence - prediction.predicted_valence
+    da = measured.measured_arousal - prediction.predicted_arousal
+    dd = measured.measured_dominance - prediction.predicted_dominance
+    dc = measured.measured_certainty - prediction.predicted_certainty
+    geom = math.sqrt(dv * dv + da * da + dd * dd + dc * dc) / _VADC_MAX_DIST
+    geometric_error = round(_clamp(geom, 0.0, 1.0), 4)
+
+    return internal_error, geometric_error
+
+
+def update_internal_precision(
+    predictive_state: PredictiveState,
+    internal_error: float,
+) -> PredictiveState:
+    """F3 — Actualiza la precisión bayesiana del canal interno (residual).
+
+    Mismo esquema que update_precision: error bajo refuerza, error alto debilita.
+    """
+    lr = PredictiveEngine.PRECISION_LEARNING_RATE
+    threshold = PredictiveEngine.CORRECT_THRESHOLD
+
+    if internal_error < threshold:
+        predictive_state.internal_precision += lr * (1 - predictive_state.internal_precision)
+    else:
+        predictive_state.internal_precision -= (
+            lr * predictive_state.internal_precision * internal_error
+        )
+
+    predictive_state.internal_precision = round(
+        _clamp(predictive_state.internal_precision, 0.05, 0.95), 4,
+    )
+    return predictive_state
+
+
+def merge_internal_error(
+    error: PredictionError,
+    internal_error: float,
+    geometric_error: float,
+    internal_precision: float,
+) -> PredictionError:
+    """F3 — Fusiona el error residual (rezagado 1 turno) en el PredictionError.
+
+    Plan RESIDUUMREWORK F3.2: weight = 0.4*content + 0.6*internal. El término
+    "content" es el total_error texto-based de v5; el término "internal" mezcla
+    Jaccard de clusters y distancia geométrica VAD-C.
+
+    Reescala total_error y vulnerability sin tocar la amplificación de modo
+    (x1.3 raw / x1.6 extreme vive aparte en prediction_error_to_emotion_modulation,
+    así el invariante Raw/Extreme se preserva). Devuelve un PredictionError NUEVO.
+    """
+    internal_component = _clamp(0.5 * internal_error + 0.5 * geometric_error, 0.0, 1.0)
+    new_total = _clamp(0.4 * error.total_error + 0.6 * internal_component, 0.0, 1.0)
+    # Alta precisión interna + alta divergencia interna = vulnerabilidad.
+    new_vuln = _clamp(max(error.vulnerability, internal_precision * internal_component), 0.0, 1.0)
+
+    # Si el texto no detectó sorpresa pero el residual diverge, es sorpresa
+    # neutra (algo inesperado ocurrió internamente, sin valencia clara).
+    surprise = error.surprise_type
+    if surprise == SurpriseType.NONE and internal_component > PredictiveEngine.CORRECT_THRESHOLD:
+        surprise = SurpriseType.NEUTRAL
+
+    return error.model_copy(update={
+        "internal_error": round(internal_error, 4),
+        "geometric_error": round(geometric_error, 4),
+        "has_internal": True,
+        "total_error": round(new_total, 4),
+        "vulnerability": round(new_vuln, 4),
+        "surprise_type": surprise,
+    })

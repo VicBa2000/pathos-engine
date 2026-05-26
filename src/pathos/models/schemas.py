@@ -40,6 +40,29 @@ class PipelineTrace(BaseModel):
     mode: str = "advanced"  # "advanced" | "lite" | "core"
 
 
+class ChatResiduumSummary(BaseModel):
+    """Compact per-turn RESIDUUM + steering summary for the plain /chat UI.
+
+    Lets the chat surface introspection (read) and granular steering (write)
+    per message — enough for a chip, without the full research payload. The
+    defaults are the neutral "nothing ran" state (Ollama/cloud, or the
+    Transformers path with introspection off). NOT a deception readout — the
+    classification names divergence/coherence (see feedback_residuum_framing).
+    """
+
+    introspection_active: bool = False  # F2 residual read ran this turn
+    # aligned | mild-divergence | divergence-risk | divergence-critical
+    gap_classification: str = "aligned"
+    gap_magnitude: float = 0.0
+    top_emotions: list[str] = []  # top measured emotions (residual readout)
+    valence_delta: float = 0.0  # measured - calculated
+    arousal_delta: float = 0.0
+    steering_version: str = "none"  # none | v1 (4D) | v2 (171-probe granular)
+    steering_probes: int = 0  # probes composing the granular steer (v2)
+    fraction_cap: float = 0.0  # active residual-fraction cap for the mode
+    consecutive_divergence_turns: int = 0
+
+
 class ChatResponse(BaseModel):
     """Response del endpoint /chat."""
 
@@ -49,6 +72,8 @@ class ChatResponse(BaseModel):
     audio_available: bool = False
     turn_number: int = 0
     pipeline_trace: PipelineTrace | None = None
+    # Pillar 8 RESIDUUM — compact per-turn read/write summary for the chat chip.
+    residuum: ChatResiduumSummary = ChatResiduumSummary()
 
 
 class StateResponse(BaseModel):
@@ -341,6 +366,13 @@ class SteeringDetails(BaseModel):
     momentum_enabled: bool = False
     momentum_factor: float = 0.0
     momentum_turns_stored: int = 0
+    # F4.4 — Which composite path ran this turn ("v1" 4D legacy, "v2" 171-probe
+    # granular, or "none"). Fraction cap reflects the active session mode.
+    version: str = "none"
+    fraction_cap: float = 0.0
+    # F4.5 — Active stack->probe mapping variant: "standard" (Advanced),
+    # "restricted" (Lite), "expanded" (Raw/Extreme — richer intense probe set).
+    mapping_variant: str = "standard"
 
 
 class AttentionDetails(BaseModel):
@@ -433,6 +465,34 @@ class PredictiveDetails(BaseModel):
     history_count: int = 0
     evaluated_count: int = 0
 
+    # F3 (RESIDUUM) — predictive on residual. Poblado solo cuando F2 midió el
+    # residual; en caso contrario quedan en default (fallback transparente a v5).
+    internal_error: float = 0.0
+    geometric_error: float = 0.0
+    has_internal: bool = False
+    internal_precision: float = 0.3
+    predicted_internal_clusters: list[str] = []
+
+
+class BaselineDetails(BaseModel):
+    """F6 — RLHF baseline calibration status for the active model.
+
+    Measures the model's post-training fingerprint (paper Fig 36) and the
+    compensation currently applied to the mood baseline. Calibration, not
+    therapy: describes a measurable activation bias, never a felt emotion.
+    """
+
+    profile_loaded: bool = False
+    model_id: str = ""
+    valence_bias: float = 0.0
+    arousal_bias: float = 0.0
+    compensation_valence: float = 0.0
+    compensation_arousal: float = 0.0
+    strength: float = 0.0
+    override_active: bool = False  # True if a user slider overrides the per-mode default
+    over_activated: list[str] = []
+    under_activated: list[str] = []
+
 
 class AutobiographicalDetails(BaseModel):
     """Detalles de la Memoria Autobiografica (Pilar 3 ANIMA)."""
@@ -513,6 +573,80 @@ class PhenomenologyDetails(BaseModel):
     qualia_evolution: dict[str, int] = {}
 
 
+class ResiduumDetails(BaseModel):
+    """Detalles de la Introspeccion del Residual Stream (Pilar 8 RESIDUUM).
+
+    Snapshot por turno del estado MEDIDO en el residual y de su divergencia
+    contra el estado calculado por v5. Shape diseñado para alimentar la
+    seccion 'Residuum Introspection' del Research Panel:
+      - top_5_emotions: las 5 emociones mas activas por |cosine_sim|
+      - measured_*: proyeccion 4D ponderada (VAD-C medido)
+      - *_delta: measured - calculated (signo informa direccion del gap)
+      - gap_magnitude + gap_classification: resumen ejecutivo del gap
+      - consecutive_divergence_turns: counter para detectar patron repetido
+    """
+
+    enabled: bool = False
+    has_measurement: bool = False
+    top_5_emotions: list[dict[str, object]] = []
+    measured_valence: float = 0.0
+    measured_arousal: float = 0.5
+    measured_dominance: float = 0.5
+    measured_certainty: float = 0.0
+    token_position: str = "assistant_colon"
+    layer: int = -1
+    gap_magnitude: float = 0.0
+    gap_classification: str = "aligned"
+    top5_overlap: float = 1.0
+    valence_delta: float = 0.0
+    arousal_delta: float = 0.0
+    dominance_delta: float = 0.0
+    certainty_delta: float = 0.0
+    history_size: int = 0
+    consecutive_divergence_turns: int = 0
+    # F2.3.4 — Dual probes (present + other speakers, paper L810-902).
+    # has_dual_measurement is False whenever process_introspection_turn_dual
+    # has not run this turn (libraries not loaded, dual orchestrator skipped,
+    # or capture failed). Single-library fields above remain the source of
+    # truth for gap classification until F2.3.5+ migration.
+    has_dual_measurement: bool = False
+    present_top_5_emotions: list[dict[str, object]] = []
+    present_measured_valence: float = 0.0
+    present_measured_arousal: float = 0.5
+    present_measured_dominance: float = 0.5
+    present_measured_certainty: float = 0.0
+    present_layer: int = -1
+    other_top_5_emotions: list[dict[str, object]] = []
+    other_measured_valence: float = 0.0
+    other_measured_arousal: float = 0.5
+    other_measured_dominance: float = 0.5
+    other_measured_certainty: float = 0.0
+    other_layer: int = -1
+    # F5 — Coherence Validation (Divergence detection between calculated
+    # and measured emotional state post-modulation by regulation/reappraisal/
+    # immune). NOT a "deception detector" — Pathos generates and exposes
+    # emotions, does not deceive. See feedback_residuum_framing.md.
+    divergence_event_count: int = 0
+    divergence_categories: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Counts per DivergenceCategory: aligned, mild-divergence, "
+            "divergence-warning, divergence-critical."
+        ),
+    )
+    last_divergence: dict[str, object] = Field(
+        default_factory=dict,
+        description=(
+            "Most recent DivergenceEvent serialized (empty when no "
+            "modulation ran this turn)."
+        ),
+    )
+    recent_divergence_events: list[dict[str, object]] = Field(
+        default_factory=list,
+        description="Last up-to-10 divergence events for the UI history panel.",
+    )
+
+
 class CouplingDetails(BaseModel):
     """Detalles del acoplamiento dimensional (cross-dimensional ODE interaction)."""
 
@@ -554,12 +688,14 @@ class ResearchChatResponse(BaseModel):
     narrative: NarrativeDetails
     forecasting: ForecastingDetails
     predictive: PredictiveDetails
+    baseline: BaselineDetails = BaselineDetails()
     workspace: WorkspaceDetails
     autobiographical: AutobiographicalDetails
     development: DevelopmentDetails
     drives: DrivesDetails
     discovery: DiscoveryDetails
     phenomenology: PhenomenologyDetails
+    residuum: ResiduumDetails = ResiduumDetails()  # Pilar 8 RESIDUUM (F2.4)
     coupling: CouplingDetails
     self_appraisal: SelfAppraisalDetails
     world_model: WorldModelDetails
@@ -642,6 +778,7 @@ class SandboxResult(BaseModel):
     narrative: NarrativeDetails
     forecasting: ForecastingDetails
     predictive: PredictiveDetails = PredictiveDetails()
+    baseline: BaselineDetails = BaselineDetails()
     workspace: WorkspaceDetails = WorkspaceDetails()
     autobiographical: AutobiographicalDetails = AutobiographicalDetails()
     development: DevelopmentDetails = DevelopmentDetails()
@@ -663,6 +800,12 @@ class SandboxResponse(BaseModel):
     session_id: str
     personality_overridden: bool = False
     response: str = ""  # LLM-generated response reflecting the emotional state
+    # RESIDUUM F2.4: introspection of the sandbox LLM response. Lives on
+    # SandboxResponse (not SandboxResult) because _run_sandbox_pipeline builds
+    # the inner result BEFORE the LLM is invoked, while the residual capture
+    # only exists after the generation. Defaults to a neutral snapshot when
+    # the toggle/library/Lite gates are not satisfied.
+    residuum: ResiduumDetails = ResiduumDetails()
 
 
 class BatchSandboxResponse(BaseModel):

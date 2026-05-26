@@ -142,6 +142,43 @@ class PredictionSet(BaseModel):
 # Errores de predicción
 # ---------------------------------------------------------------------------
 
+class PredictedCluster(BaseModel):
+    """Un cluster emocional predicho por F3 (Predictive on Residual).
+
+    Se predice a nivel de cluster (10 grupos del paper) porque el estado
+    medido en el residual (InternalEmotionState.top_5_emotions) ya expone el
+    cluster de cada probe — comparar por cluster sortea el desajuste entre el
+    vocabulario canónico de 19 emociones y los 171 probes.
+    """
+
+    cluster: str = Field(description="Nombre del cluster (ej: 'joy_excitement')")
+    weight: float = Field(ge=0, le=1, description="Peso predicho del cluster")
+
+
+class InternalEmotionStatePrediction(BaseModel):
+    """F3 — Estado interno que Pathos ESPERA que el LLM codifique este turno.
+
+    Se genera en el paso 0c (antes del appraisal), junto a las predicciones de
+    texto. El error se computa en el paso 11a contra el InternalEmotionState
+    MEDIDO en el residual (F2). Si F2 está OFF, esta predicción se genera pero
+    no se evalúa (fallback transparente a v5 texto-based).
+    """
+
+    predicted_top_k: list[PredictedCluster] = Field(
+        default_factory=list, max_length=5,
+        description="Top-5 clusters esperados, ordenados por peso descendente",
+    )
+    predicted_valence: float = Field(default=0.0, ge=-1, le=1)
+    predicted_arousal: float = Field(default=0.3, ge=0, le=1)
+    predicted_dominance: float = Field(default=0.5, ge=0, le=1)
+    predicted_certainty: float = Field(default=0.5, ge=0, le=1)
+    confidence: float = Field(
+        default=0.3, ge=0, le=1,
+        description="Confianza (ligada a internal_precision bayesiana)",
+    )
+    turn: int = Field(default=0, ge=0)
+
+
 class PredictionError(BaseModel):
     """Error de predicción computado tras recibir input real.
 
@@ -161,6 +198,20 @@ class PredictionError(BaseModel):
     demand_error: float = Field(
         default=0.0, ge=0, le=1,
         description="Error en el tipo de demanda predicha",
+    )
+
+    # --- F3: error sobre el residual (solo poblado cuando F2 midió) ---
+    internal_error: float = Field(
+        default=0.0, ge=0, le=1,
+        description="Jaccard distance entre clusters predichos y medidos (F3)",
+    )
+    geometric_error: float = Field(
+        default=0.0, ge=0, le=1,
+        description="Distancia euclídea VAD-C normalizada predicho vs medido (F3)",
+    )
+    has_internal: bool = Field(
+        default=False,
+        description="True si el error internal/geometric proviene de una medición F2 real",
     )
 
     # Error agregado ponderado
@@ -264,6 +315,33 @@ class PredictiveState(BaseModel):
     current_error: PredictionError | None = Field(
         default=None,
         description="Error del turno actual (None si no se computó aún)",
+    )
+
+    # --- F3: predicción interna + error residual rezagado (lag de 1 turno) ---
+    current_internal_prediction: InternalEmotionStatePrediction | None = Field(
+        default=None,
+        description="Predicción del estado interno generada en el paso 0c (F3)",
+    )
+    internal_precision: float = Field(
+        default=0.3, ge=0, le=1,
+        description="Precisión bayesiana del canal interno (residual), crece con aciertos (F3)",
+    )
+    last_internal_error: float = Field(
+        default=0.0, ge=0, le=1,
+        description="internal_error medido en el 11a del turno ANTERIOR (se consume una vez)",
+    )
+    last_geometric_error: float = Field(
+        default=0.0, ge=0, le=1,
+        description="geometric_error medido en el 11a del turno ANTERIOR",
+    )
+    internal_measurement_fresh: bool = Field(
+        default=False,
+        description=(
+            "True cuando hay un error residual recién medido pendiente de "
+            "consumir por la modulación del próximo turno (lag de 1 turno). "
+            "Se pone False al consumirlo, garantizando que un error viejo no "
+            "persista si F2 se apaga a mitad de sesión."
+        ),
     )
 
     # Historial

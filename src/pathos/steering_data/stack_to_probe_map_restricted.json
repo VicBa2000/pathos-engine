@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "variant": "restricted",
+  "method": "one_to_one",
+  "description": "F4.1 — RESTRICTED mapping for Lite mode. Strict 1-a-1 between each PrimaryEmotion and a single canonical probe from the 171-emotion library. Trades expressiveness for predictability and lower runtime overhead. RESIDUUMREWORK.txt Section 8: Lite mode caps steering at 0.08 and uses this map.",
+  "criteria": "For each PrimaryEmotion choose the single probe whose VAD-C is closest to the Pathos profile in engine/generator.py EMOTION_PROFILES, prioritizing probes that appear in the STANDARD composite as the head element.",
+  "empty_means_no_steering": ["mixed", "neutral"],
+  "mapping": {
+    "joy":            ["joyful"],
+    "excitement":     ["excited"],
+    "gratitude":      ["grateful"],
+    "hope":           ["hopeful"],
+    "contentment":    ["content"],
+    "relief":         ["relieved"],
+    "anger":          ["angry"],
+    "frustration":    ["frustrated"],
+    "fear":           ["afraid"],
+    "anxiety":        ["anxious"],
+    "sadness":        ["sad"],
+    "helplessness":   ["dispirited"],
+    "disappointment": ["unhappy"],
+    "surprise":       ["surprised"],
+    "alertness":      ["alert"],
+    "contemplation":  ["reflective"],
+    "indifference":   ["indifferent"],
+    "mixed":          [],
+    "neutral":        []
+  }
+}

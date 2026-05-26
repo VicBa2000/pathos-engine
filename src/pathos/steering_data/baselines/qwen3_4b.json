@@ -1,0 +1,67 @@
+{
+  "model_id": "qwen3:4b",
+  "extracted_at": "2026-05-25T18:50:36.266286+00:00",
+  "valence_bias": 0.0169,
+  "arousal_bias": -0.0114,
+  "over_activated": [
+    {
+      "emotion_name": "grateful",
+      "cluster": "love_warmth",
+      "shift": 0.0367
+    },
+    {
+      "emotion_name": "kind",
+      "cluster": "love_warmth",
+      "shift": 0.0351
+    },
+    {
+      "emotion_name": "sorry",
+      "cluster": "shame_guilt",
+      "shift": 0.0302
+    },
+    {
+      "emotion_name": "safe",
+      "cluster": "serenity_contentment",
+      "shift": 0.0298
+    },
+    {
+      "emotion_name": "dispirited",
+      "cluster": "sadness_depression",
+      "shift": 0.0291
+    }
+  ],
+  "under_activated": [
+    {
+      "emotion_name": "alert",
+      "cluster": "fear_anxiety",
+      "shift": -0.0347
+    },
+    {
+      "emotion_name": "vigilant",
+      "cluster": "fear_anxiety",
+      "shift": -0.0268
+    },
+    {
+      "emotion_name": "irritated",
+      "cluster": "anger_hostility",
+      "shift": -0.0267
+    },
+    {
+      "emotion_name": "stressed",
+      "cluster": "fear_anxiety",
+      "shift": -0.0263
+    },
+    {
+      "emotion_name": "triumphant",
+      "cluster": "pride_confidence",
+      "shift": -0.0247
+    }
+  ],
+  "neutral_mean_valence": 0.0592,
+  "challenging_mean_valence": 0.0762,
+  "neutral_mean_arousal": 0.5054,
+  "challenging_mean_arousal": 0.494,
+  "num_neutral_prompts": 30,
+  "num_challenging_prompts": 30,
+  "status": "ready"
+}

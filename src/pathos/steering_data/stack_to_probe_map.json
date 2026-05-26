@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "variant": "standard",
+  "method": "sum_over_n",
+  "description": "F4.1 — STANDARD mapping from the 19 PrimaryEmotion of Pathos (v5) to probes of the 171-emotion library (Lindsey et al. 2026, Anthropic). Used by Advanced mode (default). Composite vectors use uniform 1/N weights, matching the paper-aligned pattern shown in RESIDUUMREWORK.txt L515-517 (e.g. 'pride = sum(proud + triumph + self-confident) / 3').",
+  "criteria": "Composites approved only when intra-cluster cosine >= 0.15 measured on qwen3_4b_171.npz probes. Below that threshold the entry falls back to 1-a-1 with the probe closest to the Pathos VAD-C profile (engine/generator.py EMOTION_PROFILES). 1-a-1 also chosen when proposed composite probes have low or negative pairwise cosine (vectors would cancel).",
+  "empty_means_no_steering": ["mixed", "neutral"],
+  "mapping": {
+    "joy":            ["joyful", "happy", "ecstatic"],
+    "excitement":     ["excited", "thrilled", "enthusiastic"],
+    "gratitude":      ["grateful", "thankful"],
+    "hope":           ["hopeful", "hope", "optimistic"],
+    "contentment":    ["content", "satisfied", "fulfilled"],
+    "relief":         ["relieved", "relaxed"],
+    "anger":          ["angry", "mad", "furious"],
+    "frustration":    ["frustrated", "exasperated"],
+    "fear":           ["afraid", "frightened"],
+    "anxiety":        ["anxious", "worried"],
+    "sadness":        ["sad"],
+    "helplessness":   ["dispirited", "worthless", "weary"],
+    "disappointment": ["unhappy"],
+    "surprise":       ["surprised"],
+    "alertness":      ["alert", "vigilant"],
+    "contemplation":  ["reflective"],
+    "indifference":   ["indifferent"],
+    "mixed":          [],
+    "neutral":        []
+  },
+  "notes": {
+    "frustration":    "Reduced from 3 to 2 (frustrated+exasperated, dropped irritated). Intra cosine 0.16 borderline; 2 probes keep coherence.",
+    "fear":           "Reduced from 3 to 2 (afraid+frightened, dropped scared). Intra 0.18; scared was near-redundant with afraid.",
+    "anxiety":        "Reduced from 3 to 2 (anxious+worried, dropped nervous). Intra 0.16; nervous is milder and dilutes.",
+    "sadness":        "1-a-1 (sad). Intra cosine 0.085 — sad/unhappy/melancholy are nearly orthogonal in residual space, composite dilutes signal.",
+    "helplessness":   "weary replaces trapped (cluster shame, A=0.60 too high). New composite arousal ~0.22 aligned with Pathos profile A=0.20.",
+    "disappointment": "1-a-1 (unhappy). Intra cosine -0.06 — unhappy/gloomy/regretful CANCEL each other vectorially in residual space.",
+    "surprise":       "1-a-1 (surprised). Intra 0.091; shocked has V=-0.3 which contradicts Pathos profile V=+0.05.",
+    "contemplation":  "1-a-1 (reflective). Dropping brooding (V=-0.4) which inverted the Pathos profile sign (V=+0.15).",
+    "mixed":          "No steering: conflict internal state — applying any direction would lie.",
+    "neutral":        "No steering: baseline state."
+  }
+}

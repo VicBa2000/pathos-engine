@@ -191,15 +191,15 @@ class OllamaProvider(LLMProvider):
             payload,
         )
 
-        # Safety net: strip any remaining thinking content.
-        # qwen3 sometimes outputs thinking without proper <think> tag,
-        # or with only a closing </think> tag.
-        if "<think>" in content:
-            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        # Safety net: strip any remaining thinking content. qwen3 sometimes
+        # outputs thinking with only a closing </think>, or — if truncated —
+        # an opening <think> with no closing tag. Handle all three.
         if "</think>" in content:
-            # Thinking leaked without opening tag — everything before </think> is thinking
-            idx = content.rfind("</think>")
-            content = content[idx + len("</think>"):].strip()
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            if "</think>" in content:  # closing tag without a matching opener
+                content = content[content.rfind("</think>") + len("</think>"):].strip()
+        if "<think>" in content:  # unclosed (truncated) reasoning — drop it
+            content = content[: content.find("<think>")].strip()
 
         return content
 

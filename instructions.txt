@@ -1,5 +1,5 @@
 ===============================================================================
-              PATHOS ENGINE v5 (ANIMA) - USAGE INSTRUCTIONS
+         PATHOS ENGINE v6 (ANIMA + RESIDUUM) - USAGE INSTRUCTIONS
 ===============================================================================
 
 ===============================================================================
@@ -127,14 +127,19 @@
     a) From the interface: click on the model selector (top right corner).
        The Model Manager Panel opens with 5 tabs:
 
-       LOCAL       — installed Ollama models with Ollama/Steering toggle per model:
+       LOCAL       — installed Ollama models with an Ollama/Steering toggle per model:
                      Toggle left (green) = Ollama HTTP (fast, prompt injection)
-                     Toggle right (purple) = Steering (direct LLM modification via
-                     TransformersProvider — steering vectors + attention + prefix)
-                     Toggle disabled (grey) if model architecture not compatible.
-                     Compatible architectures: llama, qwen2/2.5, mistral, phi3,
-                     starcoder2. First Steering activation downloads HuggingFace
-                     safetensors (~4GB one-time, cached) and extracts vectors.
+                     Toggle right (purple) = Steering — the "Direct" Transformers
+                     path (steering vectors + attention + prefix, and RESIDUUM
+                     introspection when a probe library is present).
+                     Toggle disabled (grey) only if the model can't load locally
+                     (cloud / incompatible). steering_compatible = HF-mappable OR
+                     GGUF-loadable: llama, qwen2/2.5, qwen3, gemma, mistral, phi3,
+                     starcoder2 all qualify. Switching is DIRECT (no blocking
+                     extraction; downloads HF safetensors once if needed, cached).
+                     A per-model RESIDUUM badge shows introspection readiness:
+                     ready (green) / needs_extraction (amber — click to extract
+                     the 171-probe library) / unsupported (grey).
                      Click model row to select via Ollama. Trash icon to delete.
        FEATURED    — curated catalog of ~25 models by category with estimated VRAM
                      (Small & Fast, Balanced, Large & Powerful, Code, Vision)
@@ -608,6 +613,72 @@
 
   Max 3 display panels active simultaneously (Avatar, Qualia Orb, Genesis,
   Network, Pipeline, Emotion Panel). Disable one to enable another.
+
+===============================================================================
+4B. RESIDUUM (v6) — USING RESIDUAL-STREAM INTROSPECTION
+===============================================================================
+
+  WHAT IT IS
+  ----------
+  RESIDUUM (Pillar 8) lets Pathos READ the LLM's residual stream and MEASURE
+  the emotions the model actually encodes — 171 linear emotion directions —
+  instead of only injecting the ones it computes. Based on Anthropic's 2026
+  paper "Emotion Concepts and their Function in a Large Language Model"
+  (Lindsey, Sofroniew et al.).
+
+  REQUIREMENTS (for the measurement features F2/F3/F5)
+  ----------------------------------------------------
+  - The LOCAL TRANSFORMERS path (not Ollama/Claude): they read real hidden
+    states. In the Model Manager, switch the model to the Transformers/Steering
+    provider.
+  - A probe library for the model (qwen3:4b ships extracted). For another model,
+    click the amber RESIDUUM badge in the Model Manager to extract it (one-time
+    background job, GPU-exclusive, can take a while), or run the CLI:
+    python -m pathos.engine.steering_extract --extract-171 --model <id>.
+  - Advanced mode (not Lite). On a 6GB GPU, enable 4-bit load
+    (PATHOS_TRANSFORMERS_LOAD_IN_4BIT=true) so the model fits.
+
+  ENABLING / DISABLING
+  --------------------
+  - With the Transformers path + probe library + Advanced/Raw/Extreme,
+    introspection AUTO-ENABLES (default ON). You don't need to do anything.
+  - To opt out, click "Disable" on the Residuum Introspection section header in
+    the Research Panel (Research mode). Your choice sticks for the session.
+  - On Ollama/Claude or in Lite mode it stays OFF silently; granular steering
+    (F4) still applies as prompt injection with the 171-emotion vocabulary, and
+    baseline calibration (F6) still applies.
+
+  SEEING IT WITHOUT RESEARCH MODE
+  -------------------------------
+  - Global "Introspection" indicator (bottom-left of the app): ON / ready / off
+    — tells you at a glance whether the residual is being read.
+  - Per-message chip under each chat reply (Companion/Raw/Extreme): the measured
+    divergence (coherente / divergencia leve|riesgo|critica + magnitude) with a
+    colored bubble border; click to expand the measured top emotions, deltaV/deltaA
+    (measured vs calculated) and the steering composite used (v2 / probes / cap).
+    It is READ-ONLY — it never alters the response. In Raw/Extreme it shows the
+    higher cap (0.12/0.15) and amplified state (steering amplifies, never censors).
+
+  WHAT TO LOOK AT (Research mode -> Research Panel)
+  -------------------------------------------------
+  - Residuum Introspection: the top-5 emotions the model is ACTUALLY encoding
+    (measured) vs the ones Pathos calculated, plus the authenticity gap.
+  - Coherence Audit: divergence events — did the model squash an emotion Pathos
+    generated? (the paper's "deflection" pattern).
+  - Composite (under Steering Vectors): which steering ran (V1/V2), the active
+    cap, and the mapping variant (standard / expanded for Raw/Extreme).
+  - Baseline Calibration: the model's measured RLHF bias and the compensation
+    applied, with a SLIDER to override the strength (Reset returns to the
+    per-mode default).
+  - A disclaimer is always shown: the measured state is a FUNCTIONAL readout,
+    not evidence of subjective experience.
+
+  ETHICS
+  ------
+  When introspection is on, any suppressive system measures the residual before
+  and after and reports the delta — suppression without measurement is
+  prohibited. Steering caps are inviolable (0.15 absolute ceiling). The system
+  never claims to feel; it reports what it measures.
 
 ===============================================================================
 5. VOICE
